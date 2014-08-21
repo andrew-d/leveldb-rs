@@ -5,22 +5,22 @@ pub mod ffi {
     use libc::types::os::arch::c95::size_t;
 
     // These are opaque types that LevelDB uses.
-    type leveldb_t = c_void;
-    type leveldb_cache_t = c_void;
-    type leveldb_comparator_t = c_void;
-    type leveldb_env_t = c_void;
-    type leveldb_filelock_t = c_void;
-    type leveldb_filterpolicy_t = c_void;
-    type leveldb_iterator_t = c_void;
-    type leveldb_logger_t = c_void;
-    type leveldb_options_t = c_void;
-    type leveldb_randomfile_t = c_void;
-    type leveldb_readoptions_t = c_void;
-    type leveldb_seqfile_t = c_void;
-    type leveldb_snapshot_t = c_void;
-    type leveldb_writablefile_t = c_void;
-    type leveldb_writebatch_t = c_void;
-    type leveldb_writeoptions_t = c_void;
+    pub type leveldb_t = c_void;
+    pub type leveldb_cache_t = c_void;
+    pub type leveldb_comparator_t = c_void;
+    pub type leveldb_env_t = c_void;
+    pub type leveldb_filelock_t = c_void;
+    pub type leveldb_filterpolicy_t = c_void;
+    pub type leveldb_iterator_t = c_void;
+    pub type leveldb_logger_t = c_void;
+    pub type leveldb_options_t = c_void;
+    pub type leveldb_randomfile_t = c_void;
+    pub type leveldb_readoptions_t = c_void;
+    pub type leveldb_seqfile_t = c_void;
+    pub type leveldb_snapshot_t = c_void;
+    pub type leveldb_writablefile_t = c_void;
+    pub type leveldb_writebatch_t = c_void;
+    pub type leveldb_writeoptions_t = c_void;
 
     pub static LEVELDB_NO_COMPRESSION: c_int = 0;
     pub static LEVELDB_SNAPPY_COMPRESSION: c_int = 1;
