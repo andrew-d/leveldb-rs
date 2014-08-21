@@ -1,0 +1,5 @@
+# Cargo output
+target
+
+# Since this is a library, we ignore it
+Cargo.lock
