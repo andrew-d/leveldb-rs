@@ -26,6 +26,7 @@ pub mod ffi {
     pub static LEVELDB_SNAPPY_COMPRESSION: c_int = 1;
 
     #[link(name = "leveldb", kind = "static")]
+    #[link(name = "snappy", kind = "static")]
     extern "C" {
         // DB operations
         pub fn leveldb_open(options: *const leveldb_options_t, name: *const c_char, errptr: *mut *mut c_char) -> *mut leveldb_t;
@@ -147,4 +148,8 @@ pub mod ffi {
         pub fn leveldb_major_version() -> c_int;
         pub fn leveldb_minor_version() -> c_int;
     }
+
+    #[cfg(target_os = "linux")]
+    #[link(name="stdc++")]
+    extern {}
 }

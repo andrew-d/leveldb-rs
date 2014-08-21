@@ -39,7 +39,7 @@ $(SNAPPY_LIBRARY): $(SNAPPY_DIR)/Makefile
 $(SNAPPY_DIR)/Makefile: $(SNAPPY_DIR)/config.status
 
 $(SNAPPY_DIR)/config.status:
-	$(PREFIX)cd $(SNAPPY_DIR) && ./configure
+	$(PREFIX)cd $(SNAPPY_DIR) && ./configure CXXFLAGS="-fPIC"
 
 
 # ----------------------------------------------------------------------
@@ -50,7 +50,7 @@ LEVELDB_LIBRARY := $(LEVELDB_DIR)/libleveldb.a
 leveldb: $(LEVELDB_LIBRARY)
 
 $(LEVELDB_LIBRARY): snappy
-	$(PREFIX)LDFLAGS="-L$(realpath $(SNAPPY_DIR))/.libs" CXXFLAGS="-I$(realpath $(SNAPPY_DIR))" make -C $(LEVELDB_DIR)
+	$(PREFIX)LDFLAGS="-L$(realpath $(SNAPPY_DIR))/.libs" CXXFLAGS="-I$(realpath $(SNAPPY_DIR)) -fPIC" make -C $(LEVELDB_DIR)
 
 
 # ----------------------------------------------------------------------

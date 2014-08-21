@@ -17,3 +17,4 @@ snappy-*/libsnappy.la
 snappy-*/libtool
 snappy-*/snappy_unittest
 snappy-*/stamp-h1
+snappy-*/autom4te.cache
