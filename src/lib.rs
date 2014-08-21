@@ -273,4 +273,22 @@ mod tests {
             Err(why) => fail!("Error creating DB: {}", why),
         };
     }
+
+    #[test]
+    fn test_put() {
+        let tdir = match TempDir::new("put") {
+            Some(t) => t,
+            None    => fail!("Error creating temp dir"),
+        };
+
+        let mut db = match DB::create(tdir.path()) {
+            Ok(db)   => db,
+            Err(why) => fail!("Error creating DB: {}", why),
+        };
+
+        match db.put(b"foo", b"bar") {
+            Ok(_)    => {},
+            Err(why) => fail!("Error putting into DB: {}", why),
+        };
+    }
 }
