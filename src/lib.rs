@@ -95,7 +95,10 @@ pub struct DBOptions {
 }
 
 impl DBOptions {
-    /// Create a new Options instance
+    /**
+     * Create and return a new DBOptions instance.  Returns `None` if the
+     * underlying library call returns a null pointer.
+     */
     pub fn new() -> Option<DBOptions> {
         let opts = unsafe { cffi::leveldb_options_create() };
         if opts.is_null() {
@@ -136,7 +139,10 @@ pub struct DBWriteOptions {
 }
 
 impl DBWriteOptions {
-    /// Create a new DBWriteOptions instance
+    /**
+     * Create and return a new DBWriteOptions instance.  Returns `None` if the
+     * underlying library call returns a null pointer.
+     */
     pub fn new() -> Option<DBWriteOptions> {
         let opts = unsafe { cffi::leveldb_writeoptions_create() };
         if opts.is_null() {
@@ -167,7 +173,11 @@ pub struct DB {
 }
 
 impl DB {
-    /// Open a database at the given path.
+    /**
+     * Open a database at the given path.  Returns a Result indicating whether
+     * the database could be opened.  Note that this function will not create
+     * the database at the given location if it does not exist.
+     */
     pub fn open(path: &Path) -> LevelDBResult<DB> {
         // TODO: proper return code for OOM
         let opts = match DBOptions::new() {
@@ -178,7 +188,9 @@ impl DB {
         DB::open_with_opts(path, opts)
     }
 
-    /// Create a database at the given path.
+    /**
+     * Create and returns a database at the given path.
+     */
     pub fn create(path: &Path) -> LevelDBResult<DB> {
         // TODO: proper return code for OOM
         let mut opts = match DBOptions::new() {
@@ -186,12 +198,17 @@ impl DB {
             None    => fail!("Out of memory"),
         };
 
-        opts.create_if_missing(true);
+        // TODO: can we remove a previously-existing database?
 
+        opts.create_if_missing(true);
         DB::open_with_opts(path, opts)
     }
 
-    /// Open a new database, specifying what options to use.
+    /**
+     * Open a database at the given path, using the provided options to control
+     * the open behaviour.  Returns a Result indicating whether or not the
+     * database could be opened.
+     */
     pub fn open_with_opts(path: &Path, opts: DBOptions) -> LevelDBResult<DB> {
         let res = path_as_c_str(path, |path| {
             with_errptr(|errptr| {
@@ -203,12 +220,15 @@ impl DB {
             Ok(db) => db,
             Err(v) => return Err(v),
         };
-Ok(DB {
+        Ok(DB {
             db: db,
         })
     }
 
-    /// Put a key into the database.
+    /**
+     * Set the database entry for "key" to "value". Returns a result indicating
+     * the success or failure of the operation.
+     */
     pub fn put(&mut self, key: &[u8], val: &[u8]) -> LevelDBResult<()> {
         // TODO: proper return code for OOM
         let opts = match DBWriteOptions::new() {
