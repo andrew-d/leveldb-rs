@@ -154,6 +154,21 @@ impl DBWriteOptions {
         }
     }
 
+    /**
+     * Set whether the write will be flushed to disk before the write is
+     * considered "complete".  Essentially, if a write is performed without
+     * this value set, it has the same semantics as the `write()` syscall.  If
+     * sync is set, the semantics are the same as a `write()` followed by a
+     * `fsync()` call.
+     *
+     * The default value is false.
+     */
+    pub fn set_sync(&mut self, val: bool) {
+        unsafe {
+            cffi::leveldb_writeoptions_set_sync(self.opts, bool_to_uchar(val));
+        }
+    }
+
     unsafe fn ptr(&self) -> *const cffi::leveldb_writeoptions_t {
         self.opts as *const cffi::leveldb_writeoptions_t
     }
@@ -162,6 +177,59 @@ impl DBWriteOptions {
 impl Drop for DBWriteOptions {
     fn drop(&mut self) {
         unsafe { cffi::leveldb_writeoptions_destroy(self.opts) };
+    }
+}
+
+pub struct DBWriteBatch {
+    batch: *mut cffi::leveldb_writebatch_t,
+}
+
+impl DBWriteBatch {
+    pub fn new() -> Option<DBWriteBatch> {
+        let batch = unsafe { cffi::leveldb_writebatch_create() };
+        if batch.is_null() {
+            None
+        } else {
+            Some(DBWriteBatch {
+                batch: batch,
+            })
+        }
+    }
+
+    /**
+     * Set the database entry for "key" to "value".  See `put()` on `DB` for
+     * more information.
+     */
+    pub fn put(&mut self, key: &[u8], val: &[u8]) {
+        unsafe {
+            cffi::leveldb_writebatch_put(
+                self.batch,
+                key.as_ptr() as *const c_char,
+                key.len() as size_t,
+                val.as_ptr() as *const c_char,
+                val.len() as size_t
+            )
+        }
+    }
+
+    pub fn clear(&mut self) {
+        unsafe { cffi::leveldb_writebatch_clear(self.batch) };
+    }
+
+    pub fn delete(&mut self, key: &[u8]) {
+        unsafe {
+            cffi::leveldb_writebatch_delete(
+                self.batch,
+                key.as_ptr() as *const c_char,
+                key.len() as size_t
+            )
+        };
+    }
+}
+
+impl Drop for DBWriteBatch {
+    fn drop(&mut self) {
+        unsafe { cffi::leveldb_writebatch_destroy(self.batch) };
     }
 }
 
@@ -236,6 +304,14 @@ impl DB {
             None    => fail!("Out of memory"),
         };
 
+        self.put_opts(key, val, opts)
+    }
+
+    /**
+     * Set the database entry for "key" to "value".  Allows specifying the
+     * write options to use for this operaton.
+     */
+    pub fn put_opts(&mut self, key: &[u8], val: &[u8], opts: DBWriteOptions) -> LevelDBResult<()> {
         try!(with_errptr(|errptr| {
             unsafe {
                 cffi::leveldb_put(
@@ -250,6 +326,59 @@ impl DB {
             }
         }))
 
+        Ok(())
+    }
+
+    /**
+     * Remove the database entry (if any) for "key".  Returns a result
+     * indicating the success of the operation.  It is not an error if "key"
+     * did not exist in the database.
+     */
+    pub fn delete(&mut self, key: &[u8]) -> LevelDBResult<()> {
+        // TODO: proper return code for OOM
+        let opts = match DBWriteOptions::new() {
+            Some(o) => o,
+            None    => fail!("Out of memory"),
+        };
+
+        self.delete_opts(key, opts)
+    }
+
+    /**
+     * Remove the database entry (if any) for "key".  As `delete()`, but allows
+     * specifying the write options to use for this operation.
+     */
+    pub fn delete_opts(&mut self, key: &[u8], opts: DBWriteOptions) -> LevelDBResult<()> {
+        try!(with_errptr(|errptr| {
+            unsafe {
+                cffi::leveldb_delete(
+                    self.db,
+                    opts.ptr(),
+                    key.as_ptr() as *const c_char,
+                    key.len() as size_t,
+                    errptr
+                )
+            }
+        }))
+
+        Ok(())
+    }
+
+    /**
+     * Apply the specified updates to the database, as given in the provided
+     * DBWriteBatch.  Returns a result indicating the success of the operation.
+     */
+    pub fn write(&mut self, batch: DBWriteBatch, opts: DBWriteOptions) -> LevelDBResult<()> {
+        try!(with_errptr(|errptr| {
+            unsafe {
+                cffi::leveldb_write(
+                    self.db,
+                    opts.ptr(),
+                    batch.batch,
+                    errptr
+                )
+            }
+        }))
         Ok(())
     }
 }
