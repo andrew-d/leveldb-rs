@@ -247,11 +247,20 @@ impl Drop for DBWriteOptions {
     }
 }
 
+/**
+ * A write batch holds a collection of updates to apply atomically to a
+ * database.  Updates are applied in the order in which they are added to the
+ * write batch.
+ */
 pub struct DBWriteBatch {
     batch: *mut cffi::leveldb_writebatch_t,
 }
 
 impl DBWriteBatch {
+    /**
+     * Create a new, empty write batch.  Returns None if the underlying library
+     * call returns a null pointer.
+     */
     pub fn new() -> Option<DBWriteBatch> {
         let batch = unsafe { cffi::leveldb_writebatch_create() };
         if batch.is_null() {
@@ -268,6 +277,8 @@ impl DBWriteBatch {
      * more information.
      */
     pub fn put(&mut self, key: &[u8], val: &[u8]) {
+        // TODO: does the API copy the underlying key/value, or do we need to
+        // ensure it lives long enough?
         unsafe {
             cffi::leveldb_writebatch_put(
                 self.batch,
@@ -279,10 +290,17 @@ impl DBWriteBatch {
         }
     }
 
+    /**
+     * Clear all updates buffered in this write batch.
+     */
     pub fn clear(&mut self) {
         unsafe { cffi::leveldb_writebatch_clear(self.batch) };
     }
 
+    /**
+     * If the database contains the given key, erase it.  Otherwise, do
+     * nothing.
+     */
     pub fn delete(&mut self, key: &[u8]) {
         unsafe {
             cffi::leveldb_writebatch_delete(
