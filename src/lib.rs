@@ -131,6 +131,73 @@ impl Drop for DBOptions {
 }
 
 /**
+ * This structure represents options that can be used when reading from a
+ * LevelDB instance.
+ */
+pub struct DBReadOptions {
+    opts: *mut cffi::leveldb_readoptions_t,
+}
+
+impl DBReadOptions {
+    /**
+     * Create and return a new DBReadOptions instance.  Returns `None` if the
+     * underlying library call returns a null pointer.
+     */
+    pub fn new() -> Option<DBReadOptions> {
+        let opts = unsafe { cffi::leveldb_readoptions_create() };
+        if opts.is_null() {
+            None
+        } else {
+            Some(DBReadOptions {
+                opts: opts,
+            })
+        }
+    }
+
+    /**
+     * If set to 'true', all data read from the underlying storage will be
+     * verified against corresponding checksums.
+     *
+     * Defaults to 'false'.
+     */
+    pub fn set_verify_checksums(&mut self, val: bool) {
+        unsafe {
+            cffi::leveldb_readoptions_set_verify_checksums(self.opts, bool_to_uchar(val));
+        }
+    }
+
+    /**
+     * Set whether the data read for this iteration should be cached in memory.
+     *
+     * Defaults to 'true'.
+     */
+    pub fn set_fill_cache(&mut self, val: bool) {
+        unsafe {
+            cffi::leveldb_readoptions_set_fill_cache(self.opts, bool_to_uchar(val));
+        }
+    }
+
+    /**
+     * Set the snapshot to use when reading from the database.  If this is not
+     * set, then an implicit snapshot - of the state as of the beginning of the
+     * read operation - will be used.
+     */
+    pub fn set_snapshot(&mut self) {
+        // TODO:
+    }
+
+    unsafe fn ptr(&self) -> *const cffi::leveldb_readoptions_t {
+        self.opts as *const cffi::leveldb_readoptions_t
+    }
+}
+
+impl Drop for DBReadOptions {
+    fn drop(&mut self) {
+        unsafe { cffi::leveldb_readoptions_destroy(self.opts) };
+    }
+}
+
+/**
  * This structure represents options that can be used when writing to a LevelDB
  * instance.
  */
@@ -380,6 +447,64 @@ impl DB {
             }
         }))
         Ok(())
+    }
+
+    /**
+     * If the database contains an entry for "key", return the associated value
+     * - otherwise, return None.  This value is wrapped in a Result to indicate
+     * if an error occurred.
+     */
+    pub fn get(&mut self, key: &[u8]) -> LevelDBResult<Option<Vec<u8>>> {
+        // TODO: proper return code for OOM
+        let opts = match DBReadOptions::new() {
+            Some(o) => o,
+            None    => fail!("Out of memory"),
+        };
+
+        self.get_opts(key, opts)
+    }
+
+    /**
+     * Get the value for a given key.  As `get()`, but allows specifying the
+     * options to use when reading.
+     */
+    pub fn get_opts(&mut self, key: &[u8], opts: DBReadOptions) -> LevelDBResult<Option<Vec<u8>>> {
+        let mut size: size_t = 0;
+
+        let buff = try!(with_errptr(|errptr| {
+            unsafe {
+                cffi::leveldb_get(
+                    self.db,
+                    opts.ptr(),
+                    key.as_ptr() as *const c_char,
+                    key.len() as size_t,
+                    &mut size as *mut size_t,
+                    errptr
+                )
+            }
+        }));
+
+        if buff.is_null() {
+            return Ok(None)
+        }
+
+        let size = size as uint;
+
+        // TODO: should investigate whether we can avoid another copy
+        // perhaps use std::c_vec::CVec?
+        let mut ret = Vec::with_capacity(size);
+
+        unsafe {
+            std::ptr::copy_nonoverlapping_memory(
+                ret.as_mut_ptr(),
+                buff as *const u8,
+                size
+            );
+
+            ret.set_len(size);
+        }
+
+        Ok(Some(ret))
     }
 }
 
