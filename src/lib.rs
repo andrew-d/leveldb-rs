@@ -555,8 +555,20 @@ mod tests {
 
     use std::io::TempDir;
 
-    use super::DB;
+    use super::{DB, DBWriteBatch};
     use super::ffi::ffi;
+
+    fn new_temp_db(name: &str) -> DB {
+        let tdir = match TempDir::new(name) {
+            Some(t) => t,
+            None    => fail!("Error creating temp dir"),
+        };
+
+        match DB::create(tdir.path()) {
+            Ok(db)   => db,
+            Err(why) => fail!("Error creating DB: {}", why),
+        }
+    }
 
     #[test]
     fn test_can_get_version() {
@@ -582,19 +594,70 @@ mod tests {
 
     #[test]
     fn test_put() {
-        let tdir = match TempDir::new("put") {
-            Some(t) => t,
-            None    => fail!("Error creating temp dir"),
-        };
-
-        let mut db = match DB::create(tdir.path()) {
-            Ok(db)   => db,
-            Err(why) => fail!("Error creating DB: {}", why),
-        };
+        let mut db = new_temp_db("put");
 
         match db.put(b"foo", b"bar") {
             Ok(_)    => {},
             Err(why) => fail!("Error putting into DB: {}", why),
         };
+    }
+
+    #[test]
+    fn test_put_and_get() {
+        let mut db = new_temp_db("put-and-get");
+
+        match db.put(b"foo", b"bar") {
+            Ok(_)    => {},
+            Err(why) => fail!("Error putting into DB: {}", why),
+        };
+
+        match db.get(b"foo") {
+            Ok(v)    => assert_eq!(v.expect("Value not found").as_slice(), b"bar"),
+            Err(why) => fail!("Error getting from DB: {}", why),
+        };
+    }
+
+    #[test]
+    fn test_delete() {
+        let mut db = new_temp_db("delete");
+
+        db.put(b"foo", b"bar").unwrap();
+        db.put(b"abc", b"123").unwrap();
+
+        // Note: get --> unwrap Result --> expect Option --> convert Vec to slice
+        assert_eq!(db.get(b"foo").unwrap().expect("Value not found").as_slice(), b"bar");
+        assert_eq!(db.get(b"abc").unwrap().expect("Value not found").as_slice(), b"123");
+
+        match db.delete(b"foo") {
+            Ok(_)    => {},
+            Err(why) => fail!("Error deleting from DB: {}", why),
+        }
+
+        assert_eq!(db.get(b"foo").unwrap(), None);
+        assert_eq!(db.get(b"abc").unwrap().expect("Value not found").as_slice(), b"123");
+    }
+
+    #[test]
+    fn test_write_batch() {
+        let mut db = new_temp_db("write-batch");
+
+        db.put(b"foo", b"bar").unwrap();
+        db.put(b"abc", b"123").unwrap();
+
+        let mut batch = DBWriteBatch::new().expect("Error creating batch");
+
+        batch.put(b"def", b"456");
+        batch.put(b"zzz", b"asdfgh");
+        batch.delete(b"abc");
+        batch.put(b"zzz", b"qwerty");
+
+        match db.write(batch) {
+            Ok(_)    => {},
+            Err(why) => fail!("Error writing to DB: {}", why),
+        };
+
+        assert_eq!(db.get(b"foo").unwrap().expect("Value not found").as_slice(), b"bar");
+        assert_eq!(db.get(b"def").unwrap().expect("Value not found").as_slice(), b"456");
+        assert_eq!(db.get(b"zzz").unwrap().expect("Value not found").as_slice(), b"qwerty");
     }
 }
