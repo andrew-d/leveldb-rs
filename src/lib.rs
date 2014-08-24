@@ -453,7 +453,21 @@ impl DB {
      * Apply the specified updates to the database, as given in the provided
      * DBWriteBatch.  Returns a result indicating the success of the operation.
      */
-    pub fn write(&mut self, batch: DBWriteBatch, opts: DBWriteOptions) -> LevelDBResult<()> {
+    pub fn write(&mut self, batch: DBWriteBatch) -> LevelDBResult<()> {
+        // TODO: proper return code for OOM
+        let opts = match DBWriteOptions::new() {
+            Some(o) => o,
+            None    => fail!("Out of memory"),
+        };
+
+        self.write_opts(batch, opts)
+    }
+
+    /**
+     * Apply the given write batch.  As `write()`, but allows specifying the
+     * write options to use for this operation.
+     */
+    pub fn write_opts(&mut self, batch: DBWriteBatch, opts: DBWriteOptions) -> LevelDBResult<()> {
         try!(with_errptr(|errptr| {
             unsafe {
                 cffi::leveldb_write(
