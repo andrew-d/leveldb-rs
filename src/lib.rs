@@ -11,6 +11,7 @@
 #![warn(managed_heap_memory)]
 #![warn(unnecessary_qualification)]
 #![feature(globs)]
+#![feature(unsafe_destructor)]
 
 extern crate libc;
 
@@ -491,6 +492,48 @@ impl Iterator<(Vec<u8>, Vec<u8>)> for DBIteratorAlloc {
 }
 
 /**
+ * An immutable snapshot of the database at a point in time.
+ */
+pub struct DBSnapshot<'a> {
+    sn: *mut cffi::leveldb_snapshot_t,
+
+    // TODO: we need a mutable pointer to DB to drop a snapshot
+    // Should check if we actually mutate things, and, if so, convert this to
+    // a mutable reference.  For now, though, this is immutable so that we can
+    // have multiple different snapshots.
+    db: &'a DB,
+}
+
+impl<'a> DBSnapshot<'a> {
+    // Note: deliberately not public
+    fn new_from<'a>(db: &'a DB) -> DBSnapshot<'a> {
+        let sn = unsafe { cffi::leveldb_create_snapshot(db.db) };
+
+        DBSnapshot {
+            sn: sn,
+            db: db,
+        }
+    }
+}
+
+#[unsafe_destructor]
+impl<'a> Drop for DBSnapshot<'a> {
+    fn drop(&mut self) {
+        // TODO: is this necessary?
+        if self.sn.is_null() { return }
+
+        unsafe {
+            cffi::leveldb_release_snapshot(
+                self.db.db,
+                self.sn as *const cffi::leveldb_snapshot_t,
+            )
+        };
+
+        self.sn = ptr::mut_null();
+    }
+}
+
+/**
  * This struct represents an open instance of the database.
  */
 pub struct DB {
@@ -729,6 +772,13 @@ impl DB {
         };
 
         DBIterator::new(it)
+    }
+
+    /**
+     * Return a snapshot of the database.
+     */
+    pub fn snapshot(&mut self) -> DBSnapshot {
+        DBSnapshot::new_from(self)
     }
 }
 
