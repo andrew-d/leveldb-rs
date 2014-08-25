@@ -1,8 +1,12 @@
+/*!
+ * Rust bindings for [LevelDB](https://code.google.com/p/leveldb/), a fast and
+ * lightweight key/value database library from Google.
+ */
 #![crate_name = "leveldb"]
 #![comment = "Bindings to LevelDB"]
 #![license = "MIT"]
 #![crate_type = "lib"]
-// #![warn(missing_doc)]
+#![warn(missing_doc)]
 #![warn(non_uppercase_statics)]
 #![warn(managed_heap_memory)]
 #![warn(unnecessary_qualification)]
@@ -78,11 +82,19 @@ fn with_errptr<T>(f: |*mut *mut c_char| -> T) -> LevelDBResult<T> {
     }
 }
 
-pub fn bool_to_uchar(val: bool) -> c_uchar {
+fn bool_to_uchar(val: bool) -> c_uchar {
     if val {
         1 as c_uchar
     } else {
         0 as c_uchar
+    }
+}
+
+fn uchar_to_bool(val: c_uchar) -> bool {
+    if val == 0 {
+        false
+    } else {
+        true
     }
 }
 
