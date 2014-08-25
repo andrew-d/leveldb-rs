@@ -175,10 +175,12 @@ impl DBReadOptions {
      *
      * Defaults to 'false'.
      */
-    pub fn set_verify_checksums(&mut self, val: bool) {
+    pub fn set_verify_checksums(&mut self, val: bool) -> &mut DBReadOptions {
         unsafe {
             cffi::leveldb_readoptions_set_verify_checksums(self.opts, bool_to_uchar(val));
         }
+
+        self
     }
 
     /**
@@ -186,10 +188,12 @@ impl DBReadOptions {
      *
      * Defaults to 'true'.
      */
-    pub fn set_fill_cache(&mut self, val: bool) {
+    pub fn set_fill_cache(&mut self, val: bool) -> &mut DBReadOptions {
         unsafe {
             cffi::leveldb_readoptions_set_fill_cache(self.opts, bool_to_uchar(val));
         }
+
+        self
     }
 
     /**
@@ -197,8 +201,10 @@ impl DBReadOptions {
      * set, then an implicit snapshot - of the state as of the beginning of the
      * read operation - will be used.
      */
-    pub fn set_snapshot(&mut self) {
+    pub fn set_snapshot(&mut self, _snap: &DBSnapshot) -> &mut DBReadOptions {
         // TODO:
+
+        self
     }
 
     unsafe fn ptr(&self) -> *const cffi::leveldb_readoptions_t {
@@ -245,7 +251,7 @@ impl DBWriteOptions {
      *
      * The default value is false.
      */
-    pub fn set_sync(&mut self, val: bool) {
+    pub fn set_sync(&mut self, val: bool) -> &mut DBWriteOptions {
         unsafe {
             cffi::leveldb_writeoptions_set_sync(self.opts, bool_to_uchar(val));
         }
