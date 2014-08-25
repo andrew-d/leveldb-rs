@@ -15,6 +15,9 @@
 extern crate libc;
 
 use std::ptr;
+use std::raw::Slice;
+use std::mem::transmute;
+
 use libc::{c_char, c_uchar, c_void};
 use libc::types::os::arch::c95::size_t;
 
@@ -331,6 +334,157 @@ impl Drop for DBWriteBatch {
 }
 
 /**
+ * This structure represents an iterator over the database.  Note that since
+ * the next() function is bounded by a lifetime, it does not (quite) conform
+ * to the Iterator trait.  To get this, use the alloc() helper.
+ */
+pub struct DBIterator {
+    iter: *mut cffi::leveldb_iterator_t,
+}
+
+impl DBIterator {
+    // Note: deliberately not public
+    fn new(i: *mut cffi::leveldb_iterator_t) -> DBIterator {
+        unsafe { cffi::leveldb_iter_seek_to_first(i) };
+
+        DBIterator {
+            iter: i,
+        }
+    }
+
+    /**
+     * Return the next key/value pair from this iterator.
+     */
+    pub fn next<'a>(&'a mut self) -> Option<(&'a [u8], &'a [u8])> {
+        if !uchar_to_bool(unsafe { cffi::leveldb_iter_valid(self.ptr()) }) {
+            return None;
+        }
+
+        let key_slice = unsafe {
+            let mut keylen: size_t = 0;
+            let key = cffi::leveldb_iter_key(self.ptr(),
+                &mut keylen as *mut size_t);
+
+            transmute(Slice {
+                data: key,
+                len:  keylen as uint,
+            })
+        };
+
+        let val_slice = unsafe {
+            let mut vallen: size_t = 0;
+            let val = cffi::leveldb_iter_value(
+                self.ptr(), &mut vallen as *mut size_t);
+
+            transmute(Slice {
+                data: val,
+                len:  vallen as uint,
+            })
+        };
+
+        unsafe { cffi::leveldb_iter_next(self.iter) };
+
+        Some((key_slice, val_slice))
+    }
+
+    /**
+     * Return an instance of DBIteratorAlloc, an iterator that implements the
+     * Iterator trait, but allocates new Vec<u8>s for each item.  Note that
+     * this consumes the DBIterator instance, so it can't be used again.
+     */
+    pub fn alloc(self) -> DBIteratorAlloc {
+        DBIteratorAlloc::new(self)
+    }
+
+    /**
+     * Seek to the beginning of the database.
+     */
+    pub fn seek_to_first(&mut self) {
+        unsafe { cffi::leveldb_iter_seek_to_first(self.iter) };
+    }
+
+    /**
+     * Seek to the end of the database.
+     */
+    pub fn seek_to_last(&mut self) {
+        unsafe { cffi::leveldb_iter_seek_to_last(self.iter) };
+    }
+
+    /**
+     * Seek to the first key in the database that is at or past the given
+     * target key.
+     */
+    pub fn seek(&mut self, key: &[u8]) {
+        unsafe {
+            cffi::leveldb_iter_seek(
+                self.iter,
+                key.as_ptr() as *const c_char,
+                key.len() as size_t
+            );
+        }
+    }
+
+    fn ptr(&self) -> *const cffi::leveldb_iterator_t {
+        self.iter as *const cffi::leveldb_iterator_t
+    }
+}
+
+impl Drop for DBIterator {
+    fn drop(&mut self) {
+        unsafe { cffi::leveldb_iter_destroy(self.iter) };
+    }
+}
+
+/**
+ * An iterator over a database that implements the standard library's Iterator
+ * trait.
+ */
+pub struct DBIteratorAlloc {
+    underlying: DBIterator,
+}
+
+impl DBIteratorAlloc {
+    // Note: deliberately not public
+    fn new(i: DBIterator) -> DBIteratorAlloc {
+        DBIteratorAlloc {
+            underlying: i,
+        }
+    }
+
+    /**
+     * Wraps the underlying `seek_to_first` call.
+     */
+    pub fn seek_to_first(&mut self) {
+        self.underlying.seek_to_first()
+    }
+
+    /**
+     * Wraps the underlying `seek_to_last` call.
+     */
+    pub fn seek_to_last(&mut self) {
+        self.underlying.seek_to_last()
+    }
+
+    /**
+     * Wrap the underlying `seek` call.
+     */
+    pub fn seek(&mut self, key: &[u8]) {
+        self.underlying.seek(key)
+    }
+}
+
+impl Iterator<(Vec<u8>, Vec<u8>)> for DBIteratorAlloc {
+    fn next(&mut self) -> Option<(Vec<u8>, Vec<u8>)> {
+        match self.underlying.next() {
+            Some((key, val)) => {
+                Some((Vec::from_slice(key), Vec::from_slice(val)))
+            },
+            None => None,
+        }
+    }
+}
+
+/**
  * This struct represents an open instance of the database.
  */
 pub struct DB {
@@ -550,6 +704,26 @@ impl DB {
 
         Ok(Some(ret))
     }
+
+    /**
+     * Return an iterator over the database.
+     */
+    pub fn iter(&mut self) -> DBIterator {
+        // TODO: proper return code for OOM
+        let opts = match DBReadOptions::new() {
+            Some(o) => o,
+            None    => fail!("Out of memory"),
+        };
+
+        let it = unsafe {
+            cffi::leveldb_create_iterator(
+                self.db,
+                opts.ptr()
+            )
+        };
+
+        DBIterator::new(it)
+    }
 }
 
 impl Drop for DB {
@@ -671,5 +845,54 @@ mod tests {
         assert_eq!(db.get(b"foo").unwrap().expect("Value not found").as_slice(), b"bar");
         assert_eq!(db.get(b"def").unwrap().expect("Value not found").as_slice(), b"456");
         assert_eq!(db.get(b"zzz").unwrap().expect("Value not found").as_slice(), b"qwerty");
+    }
+
+    #[test]
+    fn test_iteration() {
+        let mut db = new_temp_db("iteration");
+
+        db.put(b"foo", b"bar").unwrap();
+        db.put(b"abc", b"123").unwrap();
+
+        let mut it = db.iter();
+
+        let t1 = match it.next() {
+            Some((key, val)) => {
+                (Vec::from_slice(key), Vec::from_slice(val))
+            },
+            None => fail!("Expected item 1"),
+        };
+        let t2 = match it.next() {
+            Some((key, val)) => {
+                (Vec::from_slice(key), Vec::from_slice(val))
+            },
+            None => fail!("Expected item 2"),
+        };
+        let t3 = it.next();
+
+        // Keys are stored ordered, despite the fact we inserted unordered.
+        assert_eq!(t1.ref0().as_slice(), b"abc");
+        assert_eq!(t1.ref1().as_slice(), b"123");
+
+        assert_eq!(t2.ref0().as_slice(), b"foo");
+        assert_eq!(t2.ref1().as_slice(), b"bar");
+
+        assert!(t3.is_none());
+    }
+
+    #[test]
+    fn test_iteration_alloc() {
+        let mut db = new_temp_db("iteration");
+
+        db.put(b"foo", b"bar").unwrap();
+        db.put(b"abc", b"123").unwrap();
+
+        let items: Vec<(Vec<u8>, Vec<u8>)> = db.iter().alloc().collect();
+
+        assert_eq!(items.len(), 2u);
+        assert_eq!(items[0].ref0().as_slice(), b"abc");
+        assert_eq!(items[0].ref1().as_slice(), b"123");
+        assert_eq!(items[1].ref0().as_slice(), b"foo");
+        assert_eq!(items[1].ref1().as_slice(), b"bar");
     }
 }
