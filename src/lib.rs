@@ -256,6 +256,8 @@ impl DBWriteOptions {
         unsafe {
             cffi::leveldb_writeoptions_set_sync(self.opts, bool_to_uchar(val));
         }
+
+        self
     }
 
     unsafe fn ptr(&self) -> *const cffi::leveldb_writeoptions_t {

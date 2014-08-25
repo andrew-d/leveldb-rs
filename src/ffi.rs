@@ -66,9 +66,12 @@ pub mod ffi {
         pub fn leveldb_writebatch_clear(b: *mut leveldb_writebatch_t);
         pub fn leveldb_writebatch_put(b: *mut leveldb_writebatch_t, key: *const c_char, keylen: size_t, val: *const c_char, vallen: size_t);
         pub fn leveldb_writebatch_delete(b: *mut leveldb_writebatch_t, key: *const c_char, keylen: size_t);
-        // pub fn leveldb_writebatch_iterate(b: *mut leveldb_writebatch_t, state: *mut c_void, /* TODO */);
-        //    void (*put)(void*, const char* k, size_t klen, const char* v, size_t vlen),
-        //    void (*deleted)(void*, const char* k, size_t klen));
+        pub fn leveldb_writebatch_iterate(
+            b: *mut leveldb_writebatch_t,
+            state: *mut c_void,
+            put: extern fn(*mut c_void, *const c_char, size_t, *const c_char, size_t),
+            deleted: extern fn(*mut c_void, *const c_char, size_t)
+        );
 
         // Options
         pub fn leveldb_options_create() -> *mut leveldb_options_t;
