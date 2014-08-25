@@ -431,6 +431,13 @@ impl DBIterator {
         }
     }
 
+    /**
+     * Move to the previous item in the database.
+     */
+    pub fn prev(&mut self) {
+        unsafe { cffi::leveldb_iter_prev(self.iter) };
+    }
+
     fn ptr(&self) -> *const cffi::leveldb_iterator_t {
         self.iter as *const cffi::leveldb_iterator_t
     }
