@@ -149,7 +149,9 @@ pub mod ffi {
         pub fn leveldb_minor_version() -> c_int;
     }
 
+    // TODO: Should figure out a better way to specify this.
     #[cfg(target_os = "linux")]
+    #[cfg(target_os = "macos")]
     #[link(name="stdc++")]
     extern {}
 }
