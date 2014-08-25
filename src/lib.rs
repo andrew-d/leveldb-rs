@@ -334,6 +334,67 @@ impl DBWriteBatch {
             )
         };
     }
+
+    /**
+     * Iterate over the contents of the write batch by calling callbacks for
+     * each operation in the batch.
+     */
+    pub fn iterate<'a>(&'a self, put: |&'a [u8], &'a [u8]|: 'a, delete: |&'a [u8]|: 'a) {
+        // TODO: should check to make sure it's not possible to "leak" a reference to a key/value past the end of this function
+        let mut it = DBWriteBatchIter {
+            put: put,
+            delete: delete,
+        };
+
+        unsafe {
+            cffi::leveldb_writebatch_iterate(
+                self.batch,
+                &mut it as *mut _ as *mut c_void,
+                writebatch_put_callback,
+                writebatch_delete_callback
+            );
+        };
+    }
+}
+
+struct DBWriteBatchIter<'a> {
+    pub put:    |&'a [u8], &'a [u8]|: 'a,
+    pub delete: |&'a [u8]|: 'a,
+}
+
+// Callback for DBWriteBatchIter
+extern "C" fn writebatch_put_callback(state: *mut c_void, key: *const c_char, klen: size_t, val: *const c_char, vlen: size_t) {
+    let it = state as *mut DBWriteBatchIter;
+
+    let key_slice = unsafe {
+        transmute(Slice {
+            data: key,
+            len:  klen as uint,
+        })
+    };
+
+    let val_slice = unsafe {
+        transmute(Slice {
+            data: val,
+            len:  vlen as uint,
+        })
+    };
+
+    unsafe { ((*it).put)(key_slice, val_slice) };
+}
+
+// Callback for DBWriteBatchIter
+extern "C" fn writebatch_delete_callback(state: *mut c_void, key: *const c_char, klen: size_t) {
+    let it = state as *mut DBWriteBatchIter;
+
+    let key_slice = unsafe {
+        transmute(Slice {
+            data: key,
+            len:  klen as uint,
+        })
+    };
+
+    unsafe { ((*it).delete)(key_slice) };
 }
 
 impl Drop for DBWriteBatch {
@@ -895,12 +956,30 @@ mod tests {
         db.put(b"foo", b"bar").unwrap();
         db.put(b"abc", b"123").unwrap();
 
+        // Test putting into a write batch
+
         let mut batch = DBWriteBatch::new().expect("Error creating batch");
 
         batch.put(b"def", b"456");
         batch.put(b"zzz", b"asdfgh");
         batch.delete(b"abc");
         batch.put(b"zzz", b"qwerty");
+
+        // Test iteration
+
+        let mut puts: Vec<(Vec<u8>, Vec<u8>)> = vec![];
+        let mut deletes: Vec<Vec<u8>> = vec![];
+
+        batch.iterate(|k, v| {
+            puts.push((Vec::from_slice(k), Vec::from_slice(v)));
+        }, |k| {
+            deletes.push(Vec::from_slice(k));
+        });
+
+        assert_eq!(puts.len(), 3);
+        assert_eq!(deletes.len(), 1);
+
+        // Test writing
 
         match db.write(batch) {
             Ok(_)    => {},
