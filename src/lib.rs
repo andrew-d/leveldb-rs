@@ -1057,6 +1057,16 @@ impl DB {
     pub fn snapshot(&mut self) -> DBSnapshot {
         DBSnapshot::new_from(self)
     }
+
+    // TODO:
+    //  - static `destroy()` and `repair`
+    //  - set caching
+    //  - approximate size / compact range
+    //  - property values
+    //  - filter policy (what's it do?)
+    //  - solve various memory leaks / lifetime issues
+    //  - implement "real" errors
+    //      - also need to free *errptr's
 }
 
 impl Drop for DB {
