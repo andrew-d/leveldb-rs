@@ -91,17 +91,12 @@ pub mod ffi {
         pub fn leveldb_options_set_compression(o: *mut leveldb_options_t, val: c_int);
 
         // Comparator
-        // pub fn leveldb_comparator_create(state: *mut c_void, /* TODO */) -> *mut leveldb_comparator_t;
-        /*
-            extern leveldb_comparator_t* leveldb_comparator_create(
-                void* state,
-                void (*destructor)(void*),
-                int (*compare)(
-                    void*,
-                    const char* a, size_t alen,
-                    const char* b, size_t blen),
-                const char* (*name)(void*));
-        */
+        pub fn leveldb_comparator_create(
+            state: *mut c_void,
+            destructor: extern fn(*mut c_void),
+            compare: extern fn(*mut c_void, *const c_char, size_t, *const c_char, size_t) -> c_int,
+            name: extern fn(*mut c_void) -> *const c_char
+        ) -> *mut leveldb_comparator_t;
         pub fn leveldb_comparator_destroy(c: *mut leveldb_comparator_t);
 
         // Filter policy

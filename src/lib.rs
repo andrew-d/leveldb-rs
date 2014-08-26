@@ -127,6 +127,19 @@ impl DBOptions {
     }
 
     /**
+     * Set the comparator to use for this database.  By default, LevelDB uses
+     * a comparator does a lexicographic comparison.
+     * Note also that a comparator must be thread-safe.
+     */
+    pub fn set_comparator(&mut self, cmp: DBComparator) -> &mut DBOptions {
+        unsafe {
+            cffi::leveldb_options_set_comparator(self.opts, cmp.to_comparator());
+        }
+
+        self
+    }
+
+    /**
      * Create the database if it's missing when we try to open it.
      *
      * Default: false
@@ -251,6 +264,88 @@ impl DBOptions {
 impl Drop for DBOptions {
     fn drop(&mut self) {
         unsafe { cffi::leveldb_options_destroy(self.opts) };
+    }
+}
+
+/**
+ * This structure represents a comparator for use in LevelDB.
+ */
+pub struct DBComparator {
+    name: &'static str,
+    cmp: |&[u8], &[u8]|: 'static -> Ordering,
+}
+
+impl DBComparator {
+    /**
+     * Create a new comparator with the given name and comparison function.
+     */
+    pub fn new(name: &'static str, cmp: |&[u8], &[u8]|: 'static -> Ordering) -> DBComparator {
+        DBComparator {
+            name: name,
+            cmp: cmp,
+        }
+    }
+
+    fn to_comparator(self) -> *mut cffi::leveldb_comparator_t {
+        let cmp = box self;
+
+        let r = unsafe {
+            cffi::leveldb_comparator_create(
+                transmute(cmp),
+                comparator_destructor_callback,
+                comparator_compare_callback,
+                comparator_name_callback,
+            )
+        };
+
+        r
+    }
+}
+
+#[allow(dead_code)]
+extern "C" fn comparator_destructor_callback(state: *mut c_void) {
+    // Cast the pointer back to a Rust box, and then run the drop glue.
+    let _cmp: Box<DBComparator> = unsafe { transmute(state) };
+    // Gets dropped here.
+}
+
+#[allow(dead_code)]
+extern "C" fn comparator_compare_callback(state: *mut c_void, a: *const c_char, alen: size_t, b: *const c_char, blen: size_t) -> c_int {
+    unsafe {
+        // This is only safe since Box<T> is implemented as `struct Box(*mut T)`
+        let cmp: *const DBComparator = transmute(state);
+
+        let a_slice = transmute(Slice {
+            data: a,
+            len:  alen as uint,
+        });
+
+        let b_slice = transmute(Slice {
+            data: b,
+            len:  blen as uint,
+        });
+
+        // Comment from include/leveldb/comparator.h:
+        // Three-way comparison.  Returns value:
+        //   < 0 iff "a" < "b",
+        //   == 0 iff "a" == "b",
+        //   > 0 iff "a" > "b"
+        match ((*cmp).cmp)(a_slice, b_slice) {
+            Less => -1,
+            Equal => 0,
+            Greater => 1,
+        }
+    }
+}
+
+#[allow(dead_code)]
+extern "C" fn comparator_name_callback(state: *mut c_void) -> *const c_char {
+    unsafe {
+        // This is only safe since Box<T> is implemented as `struct Box(*mut T)`
+        let cmp: *const DBComparator = transmute(state);
+
+        // This is safe to return, since the string has a static lifetime
+        (*cmp).name.as_ptr() as *const c_char
     }
 }
 
@@ -975,7 +1070,7 @@ mod tests {
 
     use std::io::TempDir;
 
-    use super::{DB, DBWriteBatch};
+    use super::{DB, DBComparator, DBWriteBatch};
     use super::ffi::ffi;
 
     fn new_temp_db(name: &str) -> DB {
@@ -1146,5 +1241,19 @@ mod tests {
         assert_eq!(items[0].ref1().as_slice(), b"123");
         assert_eq!(items[1].ref0().as_slice(), b"foo");
         assert_eq!(items[1].ref1().as_slice(), b"bar");
+    }
+
+    #[test]
+    fn test_comparator_create() {
+        let c = DBComparator::new("foo", |a, b| {
+            a.cmp(&b)
+        });
+
+        let _ = c.to_comparator();
+    }
+
+    #[test]
+    fn test_comparator() {
+        // TODO
     }
 }
