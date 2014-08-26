@@ -13,11 +13,14 @@
 #![feature(globs)]
 #![feature(unsafe_destructor)]
 
+extern crate error;
 extern crate libc;
 
 use std::ptr;
 use std::raw::Slice;
 use std::mem::transmute;
+
+pub use error::{Error, ErrorRefExt};
 
 use libc::{c_char, c_int, c_uchar, c_void};
 use libc::types::os::arch::c95::size_t;
@@ -29,31 +32,44 @@ mod ffi;
 
 /// Error type that we get from LevelDB
 pub struct LevelDBError {
-    errptr: *mut c_char,
+    err: String,
 }
 
 impl LevelDBError {
-    /// Return the error as a string.
-    pub fn as_string(&self) -> String {
-        unsafe {
-            std::string::raw::from_buf(self.errptr as *const u8)
-        }
+    fn new(errptr: *mut c_char) -> Box<Error> {
+        // Convert to a rust String, then free the LevelDB string.
+        let err = unsafe {
+            std::string::raw::from_buf(errptr as *const u8)
+        };
+        unsafe { cffi::leveldb_free(errptr as *mut c_void) };
+
+        box LevelDBError {
+            err: err,
+        } as Box<Error>
+    }
+}
+
+impl Error for LevelDBError {
+    fn name(&self) -> &'static str {
+        "LevelDB Error"
+    }
+
+    fn description(&self) -> Option<&str> {
+        Some(self.err.as_slice())
     }
 }
 
 impl std::fmt::Show for LevelDBError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> Result<(), std::fmt::FormatError> {
-        self.as_string().fmt(f)
+        self.description().unwrap().fmt(f)
     }
 }
 
-impl Drop for LevelDBError {
-    fn drop(&mut self) {
-        unsafe { cffi::leveldb_free(self.errptr as *mut c_void) };
-    }
-}
+// TODO: should create a way of reporting out-of-memory errors?
+// Note that if we do, we can't return a Box<...>, since presumably that
+// will also fail...
 
-pub type LevelDBResult<T> = Result<T, LevelDBError>;
+pub type LevelDBResult<T> = Result<T, Box<Error>>;
 
 // Convert a Path instance to a C-style string
 fn path_as_c_str<T>(path: &Path, f: |*const i8| -> T) -> T {
@@ -78,9 +94,7 @@ fn with_errptr<T>(f: |*mut *mut c_char| -> T) -> LevelDBResult<T> {
     let ret = f(&mut errptr as *mut *mut c_char);
 
     if !errptr.is_null() {
-        Err(LevelDBError {
-            errptr: errptr,
-        })
+        Err(LevelDBError::new(errptr))
     } else {
         Ok(ret)
     }
