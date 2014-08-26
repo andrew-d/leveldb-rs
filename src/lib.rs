@@ -19,7 +19,7 @@ use std::ptr;
 use std::raw::Slice;
 use std::mem::transmute;
 
-use libc::{c_char, c_uchar, c_void};
+use libc::{c_char, c_int, c_uchar, c_void};
 use libc::types::os::arch::c95::size_t;
 
 use ffi::ffi as cffi;
@@ -128,11 +128,119 @@ impl DBOptions {
 
     /**
      * Create the database if it's missing when we try to open it.
+     *
+     * Default: false
      */
-    pub fn create_if_missing(&mut self, val: bool) {
+    pub fn set_create_if_missing(&mut self, val: bool) -> &mut DBOptions {
         unsafe {
             cffi::leveldb_options_set_create_if_missing(self.opts, bool_to_uchar(val));
         }
+
+        self
+    }
+
+    /**
+     * Return an error if the database already exists.
+     *
+     * Default: false
+     */
+    pub fn set_error_if_exists(&mut self, val: bool) -> &mut DBOptions {
+        unsafe {
+            cffi::leveldb_options_set_error_if_exists(self.opts, bool_to_uchar(val));
+        }
+
+        self
+    }
+
+    /**
+     * If set to true, the library will do aggressive checking of all data
+     * that it is processing and will stop early if it detects any errors.
+     *
+     * Default: false
+     */
+    pub fn set_paranoid_checks(&mut self, val: bool) -> &mut DBOptions {
+        unsafe {
+            cffi::leveldb_options_set_paranoid_checks(self.opts, bool_to_uchar(val));
+        }
+
+        self
+    }
+
+    /**
+     * Amount of data to build up in memory (backed by an unsorted log on-disk)
+     * before converting to a sorted on-disk file.
+     *
+     * Default: 4MiB
+     */
+    pub fn set_write_buffer_size(&mut self, val: uint) -> &mut DBOptions {
+        unsafe {
+            cffi::leveldb_options_set_write_buffer_size(self.opts, val as size_t);
+        }
+
+        self
+    }
+
+    /**
+     * Number of open files that can be used by the DB.  This value should be
+     * approximately one open file per 2MB of working set.
+     *
+     * Default: 1000
+     */
+    pub fn set_max_open_files(&mut self, val: int) -> &mut DBOptions {
+        unsafe {
+            cffi::leveldb_options_set_max_open_files(self.opts, val as c_int);
+        }
+
+        self
+    }
+
+    /**
+     * Approximate size of user data packed per block.  Note that this
+     * corresponds to uncompressed data.
+     *
+     * Default: 4KB
+     */
+    pub fn set_block_size(&mut self, val: uint) -> &mut DBOptions {
+        unsafe {
+            cffi::leveldb_options_set_block_size(self.opts, val as size_t);
+        }
+
+        self
+    }
+
+    /**
+     * Number of keys between restart points for delta encoding of keys.  Most
+     * clients should not change this parameter.
+     *
+     * Default: 16
+     */
+    pub fn set_block_restart_interval(&mut self, val: int) -> &mut DBOptions {
+        unsafe {
+            cffi::leveldb_options_set_block_restart_interval(self.opts, val as c_int);
+        }
+
+        self
+    }
+
+    /**
+     * Enable or disable compression.  Note that the default compression
+     * algorithm, Snappy, is significantly faster than most persistent storage.
+     * Thus, it's typically never worth switching this off.
+     *
+     * Default: true
+     */
+    pub fn set_compression(&mut self, val: bool) -> &mut DBOptions {
+        let val = if val {
+            cffi::LEVELDB_SNAPPY_COMPRESSION
+        } else {
+            cffi::LEVELDB_NO_COMPRESSION
+        };
+
+        unsafe {
+            cffi::leveldb_options_set_compression(self.opts, val);
+        }
+
+        self
     }
 
     unsafe fn ptr(&self) -> *const cffi::leveldb_options_t {
@@ -638,7 +746,7 @@ impl DB {
 
         // TODO: can we remove a previously-existing database?
 
-        opts.create_if_missing(true);
+        opts.set_create_if_missing(true);
         DB::open_with_opts(path, opts)
     }
 
