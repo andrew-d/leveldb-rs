@@ -1,6 +1,16 @@
 /*!
  * Rust bindings for [LevelDB](https://code.google.com/p/leveldb/), a fast and
  * lightweight key/value database library from Google.
+ *
+ * Warning: Some portions of this library are still unsafe to use, in that it
+ * is possible to call methods from LevelDB with stale pointers, or otherwise
+ * cause memory-unsafety.  If you'd like to avoid this, and until I fix them,
+ * please don't use:
+ *
+ * - Custom comparators
+ * - DB snapshots
+ *
+ * And please be careful with write batches.  Patches are welcome!
  */
 #![crate_name = "leveldb"]
 #![comment = "Bindings to LevelDB"]
@@ -561,7 +571,6 @@ impl DBWriteBatch {
      * each operation in the batch.
      */
     pub fn iterate<'a>(&'a self, put: |&'a [u8], &'a [u8]|: 'a, delete: |&'a [u8]|: 'a) {
-        // TODO: should check to make sure it's not possible to "leak" a reference to a key/value past the end of this function
         let mut it = DBWriteBatchIter {
             put: put,
             delete: delete,
@@ -785,37 +794,39 @@ impl Iterator<(Vec<u8>, Vec<u8>)> for DBIteratorAlloc {
 /**
  * An immutable snapshot of the database at a point in time.
  */
-pub struct DBSnapshot<'a> {
+pub struct DBSnapshot {
     sn: *mut cffi::leveldb_snapshot_t,
 
-    // TODO: we need a mutable pointer to DB to drop a snapshot
-    // Should check if we actually mutate things, and, if so, convert this to
-    // a mutable reference.  For now, though, this is immutable so that we can
-    // have multiple different snapshots.
-    db: &'a DB,
+    // We can't save a pointer to the underlying DB itself, since that would
+    // prevent any further mutation (something that we want to allow).  So,
+    // since this struct must live as long as the DB itself, we just save the
+    // underlying pointer.
+    // TODO: this is unsafe - the underlying DB could be destructed while this
+    // snapshot still exists!
+    db: *mut cffi::leveldb_t,
 }
 
-impl<'a> DBSnapshot<'a> {
+impl DBSnapshot {
     // Note: deliberately not public
-    fn new_from<'a>(db: &'a DB) -> DBSnapshot<'a> {
+    fn new_from(db: &DB) -> DBSnapshot {
         let sn = unsafe { cffi::leveldb_create_snapshot(db.db) };
 
         DBSnapshot {
             sn: sn,
-            db: db,
+            db: db.db,
         }
     }
 }
 
 #[unsafe_destructor]
-impl<'a> Drop for DBSnapshot<'a> {
+impl Drop for DBSnapshot {
     fn drop(&mut self) {
         // TODO: is this necessary?
         if self.sn.is_null() { return }
 
         unsafe {
             cffi::leveldb_release_snapshot(
-                self.db.db,
+                self.db,
                 self.sn as *const cffi::leveldb_snapshot_t,
             )
         };
@@ -1068,7 +1079,7 @@ impl DB {
     /**
      * Return a snapshot of the database.
      */
-    pub fn snapshot(&mut self) -> DBSnapshot {
+    pub fn snapshot(&self) -> DBSnapshot {
         DBSnapshot::new_from(self)
     }
 
@@ -1098,7 +1109,7 @@ mod tests {
 
     use std::io::TempDir;
 
-    use super::{DB, DBComparator, DBOptions, DBWriteBatch};
+    use super::{DB, DBComparator, DBOptions, DBReadOptions, DBWriteBatch};
     use super::ffi::ffi;
 
     fn new_temp_db(name: &str) -> DB {
@@ -1313,5 +1324,33 @@ mod tests {
         assert_eq!(items[0].ref1().as_slice(), b"bar");
         assert_eq!(items[1].ref0().as_slice(), b"aaaa");
         assert_eq!(items[1].ref1().as_slice(), b"foo");
+    }
+
+    #[test]
+    fn test_snapshot() {
+        let mut db = new_temp_db("snapshot");
+
+        db.put(b"foo", b"bar").unwrap();
+        db.put(b"abc", b"123").unwrap();
+
+        let snap = db.snapshot();
+
+        db.put(b"abc", b"456").unwrap();
+
+        let mut opts = DBReadOptions::new().expect("Out of memory");
+
+        opts.set_snapshot(&snap);
+
+        let snap_val = match db.get_opts(b"abc", opts) {
+            Ok(val) => val.expect("Expected to find key 'abc'"),
+            Err(why) => fail!("Error getting from DB: {}", why),
+        };
+        assert!(snap_val.as_slice() == b"123");
+
+        let val = match db.get(b"abc") {
+            Ok(val) => val.expect("Expected to find key 'abc'"),
+            Err(why) => fail!("Error getting from DB: {}", why),
+        };
+        assert!(val.as_slice() == b"456");
     }
 }
