@@ -1070,7 +1070,7 @@ mod tests {
 
     use std::io::TempDir;
 
-    use super::{DB, DBComparator, DBWriteBatch};
+    use super::{DB, DBComparator, DBOptions, DBWriteBatch};
     use super::ffi::ffi;
 
     fn new_temp_db(name: &str) -> DB {
@@ -1245,7 +1245,7 @@ mod tests {
 
     #[test]
     fn test_comparator_create() {
-        let c = DBComparator::new("foo", |a, b| {
+        let c = DBComparator::new("comparator-create", |a, b| {
             a.cmp(&b)
         });
 
@@ -1254,6 +1254,36 @@ mod tests {
 
     #[test]
     fn test_comparator() {
-        // TODO
+        let c = DBComparator::new("foo", |a, b| {
+            // Compare inverse
+            b.cmp(&a)
+        });
+
+        let mut opts = DBOptions::new().expect("error creating options");
+        opts.set_comparator(c).set_create_if_missing(true);
+
+        let tdir = match TempDir::new("comparator") {
+            Some(t) => t,
+            None    => fail!("Error creating temp dir"),
+        };
+
+        let mut db = match DB::open_with_opts(tdir.path(), opts) {
+            Ok(db)   => db,
+            Err(why) => fail!("Error creating DB: {}", why),
+        };
+
+        // Insert into the DB some values.
+        db.put(b"aaaa", b"foo").unwrap();
+        db.put(b"zzzz", b"bar").unwrap();
+
+        // Extract the values as an ordered vector.
+        let items: Vec<(Vec<u8>, Vec<u8>)> = db.iter().alloc().collect();
+
+        // Values should be in reverse order.
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].ref0().as_slice(), b"zzzz");
+        assert_eq!(items[0].ref1().as_slice(), b"bar");
+        assert_eq!(items[1].ref0().as_slice(), b"aaaa");
+        assert_eq!(items[1].ref1().as_slice(), b"foo");
     }
 }
