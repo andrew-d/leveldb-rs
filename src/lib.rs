@@ -289,6 +289,7 @@ impl DBComparator {
     fn to_comparator(self) -> *mut cffi::leveldb_comparator_t {
         let cmp = box self;
 
+        // TODO: when should we call leveldb_comparator_destroy?
         let r = unsafe {
             cffi::leveldb_comparator_create(
                 transmute(cmp),
@@ -405,8 +406,11 @@ impl DBReadOptions {
      * set, then an implicit snapshot - of the state as of the beginning of the
      * read operation - will be used.
      */
-    pub fn set_snapshot(&mut self, _snap: &DBSnapshot) -> &mut DBReadOptions {
-        // TODO:
+    pub fn set_snapshot(&mut self, snap: &DBSnapshot) -> &mut DBReadOptions {
+        // TODO: how do we keep the snapshot alive long enough?
+        unsafe {
+            cffi::leveldb_readoptions_set_snapshot(self.opts, snap.sn as *const cffi::leveldb_snapshot_t);
+        }
 
         self
     }
