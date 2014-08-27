@@ -871,7 +871,7 @@ impl DBSnapshot {
     /**
      * As `DB.iter`, except operating on the state of this snapshot.
      */
-    pub fn iter(&mut self) -> DBIterator {
+    pub fn iter(&self) -> DBIterator {
         // TODO: proper return code for OOM
         let mut opts = match DBReadOptions::new() {
             Some(o) => o,
@@ -1466,5 +1466,21 @@ mod tests {
             Err(why) => fail!("Error getting from DB: {}", why),
         };
         assert!(val.as_slice() == b"456");
+
+        let iter_items: Vec<(Vec<u8>, Vec<u8>)> = snap.iter().alloc().collect();
+        let db_items: Vec<(Vec<u8>, Vec<u8>)> = db.iter().alloc().collect();
+
+        assert_eq!(iter_items.len(), 2);
+        assert_eq!(db_items.len(), 2);
+
+        assert_eq!(iter_items[0].ref0().as_slice(), b"abc");
+        assert_eq!(iter_items[0].ref1().as_slice(), b"123");
+        assert_eq!(iter_items[1].ref0().as_slice(), b"foo");
+        assert_eq!(iter_items[1].ref1().as_slice(), b"bar");
+
+        assert_eq!(db_items[0].ref0().as_slice(), b"abc");
+        assert_eq!(db_items[0].ref1().as_slice(), b"456");
+        assert_eq!(db_items[1].ref0().as_slice(), b"foo");
+        assert_eq!(db_items[1].ref1().as_slice(), b"bar");
     }
 }
