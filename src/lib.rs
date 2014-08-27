@@ -28,6 +28,7 @@ extern crate libc;
 
 use std::ptr;
 use std::raw::Slice;
+use std::rc::Rc;
 use std::mem::transmute;
 
 pub use error::{Error, ErrorRefExt};
@@ -132,6 +133,10 @@ fn uchar_to_bool(val: c_uchar) -> bool {
  */
 pub struct DBOptions {
     opts: *mut cffi::leveldb_options_t,
+
+    // An (optional) comparator.  We hold on to a pointer to this to keep it
+    // alive for the lifetime of this options struct.
+    comparator: Option<DBComparator>,
 }
 
 impl DBOptions {
@@ -146,6 +151,7 @@ impl DBOptions {
         } else {
             Some(DBOptions {
                 opts: opts,
+                comparator: None,
             })
         }
     }
@@ -157,8 +163,12 @@ impl DBOptions {
      */
     pub fn set_comparator(&mut self, cmp: DBComparator) -> &mut DBOptions {
         unsafe {
-            cffi::leveldb_options_set_comparator(self.opts, cmp.to_comparator());
+            cffi::leveldb_options_set_comparator(self.opts, cmp.state.ptr);
         }
+
+        // Hold on to this comparator so it gets dropped (and thus destroyed/
+        // freed) when we do.
+        self.comparator = Some(cmp);
 
         self
     }
@@ -285,6 +295,7 @@ impl DBOptions {
     }
 }
 
+#[unsafe_destructor]
 impl Drop for DBOptions {
     fn drop(&mut self) {
         unsafe { cffi::leveldb_options_destroy(self.opts) };
@@ -292,11 +303,29 @@ impl Drop for DBOptions {
 }
 
 /**
+ * An internal structure to represent the comparator state.  Note that, since
+ * the comparator struct is movable, we can't take the address of it and pass
+ * that to leveldb_comparator_create.  So, we keep the internal state in a Box,
+ * and can move the outer struct around freely.
+ */
+struct DBComparatorState {
+    name: &'static str,
+    cmp: |&[u8], &[u8]|: 'static -> Ordering,
+    ptr: *mut cffi::leveldb_comparator_t,
+}
+
+#[unsafe_destructor]
+impl Drop for DBComparatorState {
+    fn drop(&mut self) {
+        unsafe { cffi::leveldb_comparator_destroy(self.ptr) };
+    }
+}
+
+/**
  * This structure represents a comparator for use in LevelDB.
  */
 pub struct DBComparator {
-    name: &'static str,
-    cmp: |&[u8], &[u8]|: 'static -> Ordering,
+    state: Box<DBComparatorState>,
 }
 
 impl DBComparator {
@@ -304,41 +333,39 @@ impl DBComparator {
      * Create a new comparator with the given name and comparison function.
      */
     pub fn new(name: &'static str, cmp: |&[u8], &[u8]|: 'static -> Ordering) -> DBComparator {
-        DBComparator {
+        let mut state = box DBComparatorState {
             name: name,
             cmp: cmp,
-        }
-    }
+            ptr: ptr::mut_null(),
+        };
 
-    fn to_comparator(self) -> *mut cffi::leveldb_comparator_t {
-        let cmp = box self;
-
-        // TODO: when should we call leveldb_comparator_destroy?
-        let r = unsafe {
+        let ptr = unsafe {
             cffi::leveldb_comparator_create(
-                transmute(cmp),
+                transmute(&*state),
                 comparator_destructor_callback,
                 comparator_compare_callback,
                 comparator_name_callback,
             )
         };
 
-        r
+        state.ptr = ptr;
+
+        DBComparator {
+            state: state,
+        }
     }
 }
 
 #[allow(dead_code)]
-extern "C" fn comparator_destructor_callback(state: *mut c_void) {
-    // Cast the pointer back to a Rust box, and then run the drop glue.
-    let _cmp: Box<DBComparator> = unsafe { transmute(state) };
-    // Gets dropped here.
+extern "C" fn comparator_destructor_callback(_state: *mut c_void) {
+    // Do nothing
 }
 
 #[allow(dead_code)]
 extern "C" fn comparator_compare_callback(state: *mut c_void, a: *const c_char, alen: size_t, b: *const c_char, blen: size_t) -> c_int {
     unsafe {
         // This is only safe since Box<T> is implemented as `struct Box(*mut T)`
-        let cmp: *const DBComparator = transmute(state);
+        let cmp: *const DBComparatorState = transmute(state);
 
         let a_slice = transmute(Slice {
             data: a,
@@ -367,7 +394,7 @@ extern "C" fn comparator_compare_callback(state: *mut c_void, a: *const c_char, 
 extern "C" fn comparator_name_callback(state: *mut c_void) -> *const c_char {
     unsafe {
         // This is only safe since Box<T> is implemented as `struct Box(*mut T)`
-        let cmp: *const DBComparator = transmute(state);
+        let cmp: *const DBComparatorState = transmute(state);
 
         // This is safe to return, since the string has a static lifetime
         (*cmp).name.as_ptr() as *const c_char
@@ -429,11 +456,13 @@ impl DBReadOptions {
      * Set the snapshot to use when reading from the database.  If this is not
      * set, then an implicit snapshot - of the state as of the beginning of the
      * read operation - will be used.
+     *
+     * Note: currently private, since all access should be performed through
+     * DBSnapshot
      */
-    pub fn set_snapshot(&mut self, snap: &DBSnapshot) -> &mut DBReadOptions {
-        // TODO: how do we keep the snapshot alive long enough?
+    fn set_snapshot(&mut self, snap: *const cffi::leveldb_snapshot_t) -> &mut DBReadOptions {
         unsafe {
-            cffi::leveldb_readoptions_set_snapshot(self.opts, snap.sn as *const cffi::leveldb_snapshot_t);
+            cffi::leveldb_readoptions_set_snapshot(self.opts, snap);
         }
 
         self
@@ -798,48 +827,235 @@ pub struct DBSnapshot {
     sn: *mut cffi::leveldb_snapshot_t,
 
     // We can't save a pointer to the underlying DB itself, since that would
-    // prevent any further mutation (something that we want to allow).  So,
-    // since this struct must live as long as the DB itself, we just save the
-    // underlying pointer.
-    // TODO: this is unsafe - the underlying DB could be destructed while this
-    // snapshot still exists!
-    db: *mut cffi::leveldb_t,
+    // prevent any further mutation (something that we want to allow).
+    db: DBImplPtr,
 }
 
 impl DBSnapshot {
     // Note: deliberately not public
-    fn new_from(db: &DB) -> DBSnapshot {
+    fn new_from(db: &DBImplPtr) -> DBSnapshot {
+        // Clone the underlying database to ensure that it doesn't go away.
+        let db = db.clone();
+
         let sn = unsafe { cffi::leveldb_create_snapshot(db.db) };
 
         DBSnapshot {
             sn: sn,
-            db: db.db,
+            db: db,
         }
     }
+
+    /**
+     * As `DB.get`, except operating on the state of this snapshot.
+     */
+    pub fn get(&self, key: &[u8]) -> LevelDBResult<Option<Vec<u8>>> {
+        // TODO: proper return code for OOM
+        let opts = match DBReadOptions::new() {
+            Some(o) => o,
+            None    => fail!("Out of memory"),
+        };
+
+        self.get_opts(key, opts)
+    }
+
+    /**
+     * As `DB.get_opts`, except operating on the state of this snapshot.
+     */
+    pub fn get_opts(&self, key: &[u8], opts: DBReadOptions) -> LevelDBResult<Option<Vec<u8>>> {
+        let mut opts = opts;
+
+        opts.set_snapshot(self.sn as *const cffi::leveldb_snapshot_t);
+        self.db.get(key, opts)
+    }
+
+    /**
+     * As `DB.iter`, except operating on the state of this snapshot.
+     */
+    pub fn iter(&mut self) -> DBIterator {
+        // TODO: proper return code for OOM
+        let mut opts = match DBReadOptions::new() {
+            Some(o) => o,
+            None    => fail!("Out of memory"),
+        };
+
+        opts.set_snapshot(self.sn as *const cffi::leveldb_snapshot_t);
+        self.db.iter(opts)
+    }
+
 }
 
 #[unsafe_destructor]
 impl Drop for DBSnapshot {
     fn drop(&mut self) {
-        // TODO: is this necessary?
-        if self.sn.is_null() { return }
-
         unsafe {
             cffi::leveldb_release_snapshot(
-                self.db,
+                self.db.db,
                 self.sn as *const cffi::leveldb_snapshot_t,
             )
         };
-
-        self.sn = ptr::mut_null();
     }
 }
+
+/*
+ * This internal structure keeps a reference to the underlying database, along
+ * with any other information that needs to be freed when the database goes out
+ * of scope (e.g. DB options).  It also provides the base interfaces for
+ * reading/writing to the database.
+ *
+ * WARNING: The methods on this take &self, since LevelDB itself is safe for
+ * concurrent access without any synchronization.  Note that this *does* mutate
+ * the database!  We enforce synchronization at the DB / DBSnapshot level, as
+ * opposed to this level.
+ */
+struct DBImpl {
+    // The DB handle
+    db: *mut cffi::leveldb_t,
+
+    // The options used to open the database.  We need to keep this alive for
+    // the lifetime of the database.
+    #[allow(dead_code)]
+    opts: DBOptions,
+}
+
+impl DBImpl {
+    fn open(path: &Path, opts: DBOptions) -> LevelDBResult<DBImplPtr> {
+        let res = path_as_c_str(path, |path| {
+            with_errptr(|errptr| {
+                unsafe { cffi::leveldb_open(opts.ptr(), path, errptr) }
+            })
+        });
+
+        let db = match res {
+            Ok(db) => db,
+            Err(v) => return Err(v),
+        };
+
+        Ok(Rc::new(DBImpl {
+            db: db,
+            opts: opts,
+        }))
+    }
+
+    fn put(&self, key: &[u8], val: &[u8], opts: DBWriteOptions) -> LevelDBResult<()> {
+        try!(with_errptr(|errptr| {
+            unsafe {
+                cffi::leveldb_put(
+                    self.db,
+                    opts.ptr(),
+                    key.as_ptr() as *const c_char,
+                    key.len() as size_t,
+                    val.as_ptr() as *const c_char,
+                    val.len() as size_t,
+                    errptr
+                )
+            }
+        }))
+
+        Ok(())
+    }
+
+    fn delete(&self, key: &[u8], opts: DBWriteOptions) -> LevelDBResult<()> {
+        try!(with_errptr(|errptr| {
+            unsafe {
+                cffi::leveldb_delete(
+                    self.db,
+                    opts.ptr(),
+                    key.as_ptr() as *const c_char,
+                    key.len() as size_t,
+                    errptr
+                )
+            }
+        }))
+
+        Ok(())
+    }
+
+    fn write(&self, batch: DBWriteBatch, opts: DBWriteOptions) -> LevelDBResult<()> {
+        try!(with_errptr(|errptr| {
+            unsafe {
+                cffi::leveldb_write(
+                    self.db,
+                    opts.ptr(),
+                    batch.batch,
+                    errptr
+                )
+            }
+        }))
+
+        Ok(())
+    }
+
+    fn get(&self, key: &[u8], opts: DBReadOptions) -> LevelDBResult<Option<Vec<u8>>> {
+        let mut size: size_t = 0;
+
+        let buff = try!(with_errptr(|errptr| {
+            unsafe {
+                cffi::leveldb_get(
+                    self.db,
+                    opts.ptr(),
+                    key.as_ptr() as *const c_char,
+                    key.len() as size_t,
+                    &mut size as *mut size_t,
+                    errptr
+                )
+            }
+        }));
+
+        if buff.is_null() {
+            return Ok(None)
+        }
+
+        let size = size as uint;
+
+        // TODO: should investigate whether we can avoid another copy
+        // perhaps use std::c_vec::CVec?
+        let mut ret = Vec::with_capacity(size);
+
+        unsafe {
+            std::ptr::copy_nonoverlapping_memory(
+                ret.as_mut_ptr(),
+                buff as *const u8,
+                size
+            );
+
+            ret.set_len(size);
+
+            cffi::leveldb_free(buff as *mut c_void);
+        }
+
+        Ok(Some(ret))
+    }
+
+    fn iter(&self, opts: DBReadOptions) -> DBIterator {
+        let it = unsafe {
+            cffi::leveldb_create_iterator(
+                self.db,
+                opts.ptr()
+            )
+        };
+
+        DBIterator::new(it)
+    }
+}
+
+#[unsafe_destructor]
+impl Drop for DBImpl {
+    fn drop(&mut self) {
+        unsafe {
+            cffi::leveldb_close(self.db)
+        }
+    }
+}
+
+// A reference-counted pointer to a database implementation.  We need to use
+// this, since snapshots can hold on to a reference to a DB.
+type DBImplPtr = Rc<DBImpl>;
 
 /**
  * This struct represents an open instance of the database.
  */
 pub struct DB {
-    db: *mut cffi::leveldb_t,
+    db: DBImplPtr,
 }
 
 impl DB {
@@ -880,19 +1096,10 @@ impl DB {
      * database could be opened.
      */
     pub fn open_with_opts(path: &Path, opts: DBOptions) -> LevelDBResult<DB> {
-        let res = path_as_c_str(path, |path| {
-            with_errptr(|errptr| {
-                unsafe { cffi::leveldb_open(opts.ptr(), path, errptr) }
-            })
-        });
-
-        let db = match res {
-            Ok(db) => db,
-            Err(v) => return Err(v),
-        };
-        Ok(DB {
-            db: db,
-        })
+        match DBImpl::open(path, opts) {
+            Ok(x)    => Ok(DB { db: x }),
+            Err(why) => Err(why),
+        }
     }
 
     /**
@@ -914,21 +1121,7 @@ impl DB {
      * write options to use for this operaton.
      */
     pub fn put_opts(&mut self, key: &[u8], val: &[u8], opts: DBWriteOptions) -> LevelDBResult<()> {
-        try!(with_errptr(|errptr| {
-            unsafe {
-                cffi::leveldb_put(
-                    self.db,
-                    opts.ptr(),
-                    key.as_ptr() as *const c_char,
-                    key.len() as size_t,
-                    val.as_ptr() as *const c_char,
-                    val.len() as size_t,
-                    errptr
-                )
-            }
-        }))
-
-        Ok(())
+        self.db.put(key, val, opts)
     }
 
     /**
@@ -951,19 +1144,7 @@ impl DB {
      * specifying the write options to use for this operation.
      */
     pub fn delete_opts(&mut self, key: &[u8], opts: DBWriteOptions) -> LevelDBResult<()> {
-        try!(with_errptr(|errptr| {
-            unsafe {
-                cffi::leveldb_delete(
-                    self.db,
-                    opts.ptr(),
-                    key.as_ptr() as *const c_char,
-                    key.len() as size_t,
-                    errptr
-                )
-            }
-        }))
-
-        Ok(())
+        self.db.delete(key, opts)
     }
 
     /**
@@ -985,17 +1166,7 @@ impl DB {
      * write options to use for this operation.
      */
     pub fn write_opts(&mut self, batch: DBWriteBatch, opts: DBWriteOptions) -> LevelDBResult<()> {
-        try!(with_errptr(|errptr| {
-            unsafe {
-                cffi::leveldb_write(
-                    self.db,
-                    opts.ptr(),
-                    batch.batch,
-                    errptr
-                )
-            }
-        }))
-        Ok(())
+        self.db.write(batch, opts)
     }
 
     /**
@@ -1003,7 +1174,7 @@ impl DB {
      * - otherwise, return None.  This value is wrapped in a Result to indicate
      * if an error occurred.
      */
-    pub fn get(&mut self, key: &[u8]) -> LevelDBResult<Option<Vec<u8>>> {
+    pub fn get(&self, key: &[u8]) -> LevelDBResult<Option<Vec<u8>>> {
         // TODO: proper return code for OOM
         let opts = match DBReadOptions::new() {
             Some(o) => o,
@@ -1017,43 +1188,8 @@ impl DB {
      * Get the value for a given key.  As `get()`, but allows specifying the
      * options to use when reading.
      */
-    pub fn get_opts(&mut self, key: &[u8], opts: DBReadOptions) -> LevelDBResult<Option<Vec<u8>>> {
-        let mut size: size_t = 0;
-
-        let buff = try!(with_errptr(|errptr| {
-            unsafe {
-                cffi::leveldb_get(
-                    self.db,
-                    opts.ptr(),
-                    key.as_ptr() as *const c_char,
-                    key.len() as size_t,
-                    &mut size as *mut size_t,
-                    errptr
-                )
-            }
-        }));
-
-        if buff.is_null() {
-            return Ok(None)
-        }
-
-        let size = size as uint;
-
-        // TODO: should investigate whether we can avoid another copy
-        // perhaps use std::c_vec::CVec?
-        let mut ret = Vec::with_capacity(size);
-
-        unsafe {
-            std::ptr::copy_nonoverlapping_memory(
-                ret.as_mut_ptr(),
-                buff as *const u8,
-                size
-            );
-
-            ret.set_len(size);
-        }
-
-        Ok(Some(ret))
+    pub fn get_opts(&self, key: &[u8], opts: DBReadOptions) -> LevelDBResult<Option<Vec<u8>>> {
+        self.db.get(key, opts)
     }
 
     /**
@@ -1066,21 +1202,14 @@ impl DB {
             None    => fail!("Out of memory"),
         };
 
-        let it = unsafe {
-            cffi::leveldb_create_iterator(
-                self.db,
-                opts.ptr()
-            )
-        };
-
-        DBIterator::new(it)
+        self.db.iter(opts)
     }
 
     /**
      * Return a snapshot of the database.
      */
     pub fn snapshot(&self) -> DBSnapshot {
-        DBSnapshot::new_from(self)
+        DBSnapshot::new_from(&self.db)
     }
 
     // TODO:
@@ -1090,21 +1219,12 @@ impl DB {
     //  - property values
     //  - filter policy (what's it do?)
     //  - solve various memory leaks / lifetime issues
-    //  - implement "real" errors
-    //      - also need to free *errptr's
 }
-
-impl Drop for DB {
-    fn drop(&mut self) {
-        unsafe {
-            cffi::leveldb_close(self.db)
-        }
-    }
-}
-
 
 #[cfg(test)]
 mod tests {
+    #![allow(unused_imports)]
+
     extern crate test;
 
     use std::io::TempDir;
@@ -1284,11 +1404,9 @@ mod tests {
 
     #[test]
     fn test_comparator_create() {
-        let c = DBComparator::new("comparator-create", |a, b| {
+        let _c = DBComparator::new("comparator-create", |a, b| {
             a.cmp(&b)
         });
-
-        let _ = c.to_comparator();
     }
 
     #[test]
@@ -1337,11 +1455,7 @@ mod tests {
 
         db.put(b"abc", b"456").unwrap();
 
-        let mut opts = DBReadOptions::new().expect("Out of memory");
-
-        opts.set_snapshot(&snap);
-
-        let snap_val = match db.get_opts(b"abc", opts) {
+        let snap_val = match snap.get(b"abc") {
             Ok(val) => val.expect("Expected to find key 'abc'"),
             Err(why) => fail!("Error getting from DB: {}", why),
         };
