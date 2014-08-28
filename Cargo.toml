@@ -7,3 +7,4 @@ build = "make libs_for_cargo"
 
 [dependencies.error]
 git = "https://github.com/reem/rust-error.git"
+rev = "70cf6bfc1dac1ddf5da87a6e40dca103db7d145a"
