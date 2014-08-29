@@ -47,7 +47,7 @@ pub struct LevelDBError {
 }
 
 impl LevelDBError {
-    fn new(errptr: *mut c_char) -> Box<Error> {
+    fn new(errptr: *mut c_char) -> Box<Error+Send> {
         // Convert to a rust String, then free the LevelDB string.
         let err = unsafe {
             std::string::raw::from_buf(errptr as *const u8)
@@ -56,7 +56,7 @@ impl LevelDBError {
 
         box LevelDBError {
             err: err,
-        } as Box<Error>
+        } as Box<Error+Send>
     }
 }
 
@@ -80,7 +80,7 @@ impl std::fmt::Show for LevelDBError {
 // Note that if we do, we can't return a Box<...>, since presumably that
 // will also fail...
 
-pub type LevelDBResult<T> = Result<T, Box<Error>>;
+pub type LevelDBResult<T> = Result<T, Box<Error+Send>>;
 
 // Convert a Path instance to a C-style string
 fn path_as_c_str<T>(path: &Path, f: |*const i8| -> T) -> T {
