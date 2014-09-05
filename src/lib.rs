@@ -39,7 +39,7 @@ mod ffi;
 
 
 /// Our error type
-#[deriving(Hash, PartialEq, Eq)]
+#[deriving(Clone, Hash, PartialEq, Eq)]
 pub enum LevelDBError {
     /// An error from the LevelDB C library.
     LibraryError(String),
