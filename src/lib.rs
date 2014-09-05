@@ -23,15 +23,12 @@
 #![feature(globs)]
 #![feature(unsafe_destructor)]
 
-extern crate error;
 extern crate libc;
 
 use std::ptr;
 use std::raw::Slice;
 use std::rc::Rc;
 use std::mem::transmute;
-
-pub use error::{Error, ErrorRefExt};
 
 use libc::{c_char, c_int, c_uchar, c_void};
 use libc::types::os::arch::c95::size_t;
@@ -41,44 +38,36 @@ use ffi::ffi as cffi;
 mod ffi;
 
 
-/// Error type that we get from LevelDB
-pub struct LevelDBError {
-    err: String,
+/// Our error type
+#[deriving(Hash, PartialEq, Eq)]
+pub enum LevelDBError {
+    /// An error from the LevelDB C library.
+    LibraryError(String),
+
+    /// Out of memory.
+    OutOfMemoryError,
+}
+
+impl std::fmt::Show for LevelDBError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> Result<(), std::fmt::FormatError> {
+        match *self {
+            LibraryError(ref msg) => msg.fmt(f),
+            OutOfMemoryError      => write!(f, "Out of memory"),
+        }
+    }
 }
 
 impl LevelDBError {
-    fn new(errptr: *mut c_char) -> LevelDBError {
+    fn lib_error(errptr: *mut c_char) -> LevelDBError {
         // Convert to a rust String, then free the LevelDB string.
         let err = unsafe {
             std::string::raw::from_buf(errptr as *const u8)
         };
         unsafe { cffi::leveldb_free(errptr as *mut c_void) };
 
-        LevelDBError {
-            err: err,
-        }
+        LibraryError(err)
     }
 }
-
-impl Error for LevelDBError {
-    fn name(&self) -> &'static str {
-        "LevelDB Error"
-    }
-
-    fn description(&self) -> Option<&str> {
-        Some(self.err.as_slice())
-    }
-}
-
-impl std::fmt::Show for LevelDBError {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> Result<(), std::fmt::FormatError> {
-        self.err.fmt(f)
-    }
-}
-
-// TODO: should create a way of reporting out-of-memory errors?
-// Note that if we do, we can't return a Box<...>, since presumably that
-// will also fail...
 
 pub type LevelDBResult<T> = Result<T, LevelDBError>;
 
@@ -105,7 +94,7 @@ fn with_errptr<T>(f: |*mut *mut c_char| -> T) -> LevelDBResult<T> {
     let ret = f(&mut errptr as *mut *mut c_char);
 
     if !errptr.is_null() {
-        Err(LevelDBError::new(errptr))
+        Err(LevelDBError::lib_error(errptr))
     } else {
         Ok(ret)
     }
@@ -852,7 +841,7 @@ impl DBSnapshot {
         // TODO: proper return code for OOM
         let opts = match DBReadOptions::new() {
             Some(o) => o,
-            None    => fail!("Out of memory"),
+            None    => return Err(OutOfMemoryError),
         };
 
         self.get_opts(key, opts)
@@ -871,15 +860,15 @@ impl DBSnapshot {
     /**
      * As `DB.iter`, except operating on the state of this snapshot.
      */
-    pub fn iter(&self) -> DBIterator {
+    pub fn iter(&self) -> LevelDBResult<DBIterator> {
         // TODO: proper return code for OOM
         let mut opts = match DBReadOptions::new() {
             Some(o) => o,
-            None    => fail!("Out of memory"),
+            None    => return Err(OutOfMemoryError),
         };
 
         opts.set_snapshot(self.sn as *const cffi::leveldb_snapshot_t);
-        self.db.iter(opts)
+        Ok(self.db.iter(opts))
     }
 
 }
@@ -1068,7 +1057,7 @@ impl DB {
         // TODO: proper return code for OOM
         let opts = match DBOptions::new() {
             Some(o) => o,
-            None    => fail!("Out of memory"),
+            None    => return Err(OutOfMemoryError),
         };
 
         DB::open_with_opts(path, opts)
@@ -1081,7 +1070,7 @@ impl DB {
         // TODO: proper return code for OOM
         let mut opts = match DBOptions::new() {
             Some(o) => o,
-            None    => fail!("Out of memory"),
+            None    => return Err(OutOfMemoryError),
         };
 
         // TODO: can we remove a previously-existing database?
@@ -1110,7 +1099,7 @@ impl DB {
         // TODO: proper return code for OOM
         let opts = match DBWriteOptions::new() {
             Some(o) => o,
-            None    => fail!("Out of memory"),
+            None    => return Err(OutOfMemoryError),
         };
 
         self.put_opts(key, val, opts)
@@ -1133,7 +1122,7 @@ impl DB {
         // TODO: proper return code for OOM
         let opts = match DBWriteOptions::new() {
             Some(o) => o,
-            None    => fail!("Out of memory"),
+            None    => return Err(OutOfMemoryError),
         };
 
         self.delete_opts(key, opts)
@@ -1155,7 +1144,7 @@ impl DB {
         // TODO: proper return code for OOM
         let opts = match DBWriteOptions::new() {
             Some(o) => o,
-            None    => fail!("Out of memory"),
+            None    => return Err(OutOfMemoryError),
         };
 
         self.write_opts(batch, opts)
@@ -1178,7 +1167,7 @@ impl DB {
         // TODO: proper return code for OOM
         let opts = match DBReadOptions::new() {
             Some(o) => o,
-            None    => fail!("Out of memory"),
+            None    => return Err(OutOfMemoryError),
         };
 
         self.get_opts(key, opts)
@@ -1195,14 +1184,14 @@ impl DB {
     /**
      * Return an iterator over the database.
      */
-    pub fn iter(&mut self) -> DBIterator {
+    pub fn iter(&mut self) -> LevelDBResult<DBIterator> {
         // TODO: proper return code for OOM
         let opts = match DBReadOptions::new() {
             Some(o) => o,
-            None    => fail!("Out of memory"),
+            None    => return Err(OutOfMemoryError),
         };
 
-        self.db.iter(opts)
+        Ok(self.db.iter(opts))
     }
 
     /**
@@ -1360,7 +1349,7 @@ mod tests {
         db.put(b"foo", b"bar").unwrap();
         db.put(b"abc", b"123").unwrap();
 
-        let mut it = db.iter();
+        let mut it = db.iter().unwrap();
 
         let t1 = match it.next() {
             Some((key, val)) => {
@@ -1393,7 +1382,7 @@ mod tests {
         db.put(b"foo", b"bar").unwrap();
         db.put(b"abc", b"123").unwrap();
 
-        let items: Vec<(Vec<u8>, Vec<u8>)> = db.iter().alloc().collect();
+        let items: Vec<(Vec<u8>, Vec<u8>)> = db.iter().unwrap().alloc().collect();
 
         assert_eq!(items.len(), 2u);
         assert_eq!(items[0].ref0().as_slice(), b"abc");
@@ -1434,7 +1423,7 @@ mod tests {
         db.put(b"zzzz", b"bar").unwrap();
 
         // Extract the values as an ordered vector.
-        let items: Vec<(Vec<u8>, Vec<u8>)> = db.iter().alloc().collect();
+        let items: Vec<(Vec<u8>, Vec<u8>)> = db.iter().unwrap().alloc().collect();
 
         // Values should be in reverse order.
         assert_eq!(items.len(), 2);
@@ -1467,8 +1456,8 @@ mod tests {
         };
         assert!(val.as_slice() == b"456");
 
-        let iter_items: Vec<(Vec<u8>, Vec<u8>)> = snap.iter().alloc().collect();
-        let db_items: Vec<(Vec<u8>, Vec<u8>)> = db.iter().alloc().collect();
+        let iter_items: Vec<(Vec<u8>, Vec<u8>)> = snap.iter().unwrap().alloc().collect();
+        let db_items: Vec<(Vec<u8>, Vec<u8>)> = db.iter().unwrap().alloc().collect();
 
         assert_eq!(iter_items.len(), 2);
         assert_eq!(db_items.len(), 2);
