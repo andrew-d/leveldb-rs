@@ -1223,8 +1223,8 @@ mod tests {
 
     fn new_temp_db(name: &str) -> DB {
         let tdir = match TempDir::new(name) {
-            Some(t) => t,
-            None    => fail!("Error creating temp dir"),
+            Ok(t)    => t,
+            Err(why) => fail!("Error creating temp dir: {}", why),
         };
 
         match DB::create(tdir.path()) {
@@ -1245,8 +1245,8 @@ mod tests {
     #[test]
     fn test_can_create() {
         let tdir = match TempDir::new("create") {
-            Some(t) => t,
-            None    => fail!("Error creating temp dir"),
+            Ok(t)    => t,
+            Err(why) => fail!("Error creating temp dir: {}", why),
         };
 
         let _db = match DB::create(tdir.path()) {
@@ -1409,8 +1409,8 @@ mod tests {
         opts.set_comparator(c).set_create_if_missing(true);
 
         let tdir = match TempDir::new("comparator") {
-            Some(t) => t,
-            None    => fail!("Error creating temp dir"),
+            Ok(t)    => t,
+            Err(why) => fail!("Error creating temp dir: {}", why),
         };
 
         let mut db = match DB::open_with_opts(tdir.path(), opts) {
