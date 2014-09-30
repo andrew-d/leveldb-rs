@@ -74,11 +74,11 @@ pub type LevelDBResult<T> = Result<T, LevelDBError>;
 // Convert a Path instance to a C-style string
 fn path_as_c_str<T>(path: &Path, f: |*const i8| -> T) -> T {
     // First, convert the path to a vector...
-    let mut pvec = Vec::from_slice(path.as_vec());
+    let mut pvec = path.as_vec().to_vec();
 
     // ... and ensure that it's null-terminated.
     if pvec[pvec.len() - 1] != 0 {
-        pvec = pvec.append_one(0);
+        pvec.push(0);
     }
 
     // Now, call the function with the new path pointer.
@@ -89,7 +89,7 @@ fn path_as_c_str<T>(path: &Path, f: |*const i8| -> T) -> T {
 // Provides an errptr for use with LevelDB, and properly returns a Result if
 // it's non-null.
 fn with_errptr<T>(f: |*mut *mut c_char| -> T) -> LevelDBResult<T> {
-    let mut errptr: *mut c_char = ptr::mut_null();
+    let mut errptr: *mut c_char = ptr::null_mut();
 
     let ret = f(&mut errptr as *mut *mut c_char);
 
@@ -325,7 +325,7 @@ impl DBComparator {
         let mut state = box DBComparatorState {
             name: name,
             cmp: cmp,
-            ptr: ptr::mut_null(),
+            ptr: ptr::null_mut(),
         };
 
         let ptr = unsafe {
@@ -802,7 +802,7 @@ impl Iterator<(Vec<u8>, Vec<u8>)> for DBIteratorAlloc {
     fn next(&mut self) -> Option<(Vec<u8>, Vec<u8>)> {
         match self.underlying.next() {
             Some((key, val)) => {
-                Some((Vec::from_slice(key), Vec::from_slice(val)))
+                Some((key.to_vec(), val.to_vec()))
             },
             None => None,
         }
@@ -1322,9 +1322,9 @@ mod tests {
         let mut deletes: Vec<Vec<u8>> = vec![];
 
         batch.iterate(|k, v| {
-            puts.push((Vec::from_slice(k), Vec::from_slice(v)));
+            puts.push((k.to_vec(), v.to_vec()));
         }, |k| {
-            deletes.push(Vec::from_slice(k));
+            deletes.push(k.to_vec());
         });
 
         assert_eq!(puts.len(), 3);
@@ -1353,13 +1353,13 @@ mod tests {
 
         let t1 = match it.next() {
             Some((key, val)) => {
-                (Vec::from_slice(key), Vec::from_slice(val))
+                (key.to_vec(), val.to_vec())
             },
             None => fail!("Expected item 1"),
         };
         let t2 = match it.next() {
             Some((key, val)) => {
-                (Vec::from_slice(key), Vec::from_slice(val))
+                (key.to_vec(), val.to_vec())
             },
             None => fail!("Expected item 2"),
         };
