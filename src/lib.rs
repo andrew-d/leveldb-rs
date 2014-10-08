@@ -18,7 +18,6 @@
 #![crate_type = "lib"]
 #![warn(missing_doc)]
 #![warn(non_uppercase_statics)]
-#![warn(managed_heap_memory)]
 #![warn(unnecessary_qualification)]
 #![feature(globs)]
 #![feature(unsafe_destructor)]

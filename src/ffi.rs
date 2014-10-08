@@ -148,8 +148,7 @@ pub mod ffi {
     }
 
     // TODO: Should figure out a better way to specify this.
-    #[cfg(target_os = "linux")]
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     #[link(name="stdc++")]
     extern {}
 }
