@@ -1223,12 +1223,12 @@ mod tests {
     fn new_temp_db(name: &str) -> DB {
         let tdir = match TempDir::new(name) {
             Ok(t)    => t,
-            Err(why) => fail!("Error creating temp dir: {}", why),
+            Err(why) => panic!("Error creating temp dir: {}", why),
         };
 
         match DB::create(tdir.path()) {
             Ok(db)   => db,
-            Err(why) => fail!("Error creating DB: {}", why),
+            Err(why) => panic!("Error creating DB: {}", why),
         }
     }
 
@@ -1245,12 +1245,12 @@ mod tests {
     fn test_can_create() {
         let tdir = match TempDir::new("create") {
             Ok(t)    => t,
-            Err(why) => fail!("Error creating temp dir: {}", why),
+            Err(why) => panic!("Error creating temp dir: {}", why),
         };
 
         let _db = match DB::create(tdir.path()) {
             Ok(db)   => db,
-            Err(why) => fail!("Error creating DB: {}", why),
+            Err(why) => panic!("Error creating DB: {}", why),
         };
     }
 
@@ -1260,7 +1260,7 @@ mod tests {
 
         match db.put(b"foo", b"bar") {
             Ok(_)    => {},
-            Err(why) => fail!("Error putting into DB: {}", why),
+            Err(why) => panic!("Error putting into DB: {}", why),
         };
     }
 
@@ -1270,12 +1270,12 @@ mod tests {
 
         match db.put(b"foo", b"bar") {
             Ok(_)    => {},
-            Err(why) => fail!("Error putting into DB: {}", why),
+            Err(why) => panic!("Error putting into DB: {}", why),
         };
 
         match db.get(b"foo") {
             Ok(v)    => assert_eq!(v.expect("Value not found").as_slice(), b"bar"),
-            Err(why) => fail!("Error getting from DB: {}", why),
+            Err(why) => panic!("Error getting from DB: {}", why),
         };
     }
 
@@ -1292,7 +1292,7 @@ mod tests {
 
         match db.delete(b"foo") {
             Ok(_)    => {},
-            Err(why) => fail!("Error deleting from DB: {}", why),
+            Err(why) => panic!("Error deleting from DB: {}", why),
         }
 
         assert_eq!(db.get(b"foo").unwrap(), None);
@@ -1333,7 +1333,7 @@ mod tests {
 
         match db.write(batch) {
             Ok(_)    => {},
-            Err(why) => fail!("Error writing to DB: {}", why),
+            Err(why) => panic!("Error writing to DB: {}", why),
         };
 
         assert_eq!(db.get(b"foo").unwrap().expect("Value not found").as_slice(), b"bar");
@@ -1354,13 +1354,13 @@ mod tests {
             Some((key, val)) => {
                 (key.to_vec(), val.to_vec())
             },
-            None => fail!("Expected item 1"),
+            None => panic!("Expected item 1"),
         };
         let t2 = match it.next() {
             Some((key, val)) => {
                 (key.to_vec(), val.to_vec())
             },
-            None => fail!("Expected item 2"),
+            None => panic!("Expected item 2"),
         };
         let t3 = it.next();
 
@@ -1409,12 +1409,12 @@ mod tests {
 
         let tdir = match TempDir::new("comparator") {
             Ok(t)    => t,
-            Err(why) => fail!("Error creating temp dir: {}", why),
+            Err(why) => panic!("Error creating temp dir: {}", why),
         };
 
         let mut db = match DB::open_with_opts(tdir.path(), opts) {
             Ok(db)   => db,
-            Err(why) => fail!("Error creating DB: {}", why),
+            Err(why) => panic!("Error creating DB: {}", why),
         };
 
         // Insert into the DB some values.
@@ -1445,13 +1445,13 @@ mod tests {
 
         let snap_val = match snap.get(b"abc") {
             Ok(val) => val.expect("Expected to find key 'abc'"),
-            Err(why) => fail!("Error getting from DB: {}", why),
+            Err(why) => panic!("Error getting from DB: {}", why),
         };
         assert!(snap_val.as_slice() == b"123");
 
         let val = match db.get(b"abc") {
             Ok(val) => val.expect("Expected to find key 'abc'"),
-            Err(why) => fail!("Error getting from DB: {}", why),
+            Err(why) => panic!("Error getting from DB: {}", why),
         };
         assert!(val.as_slice() == b"456");
 
