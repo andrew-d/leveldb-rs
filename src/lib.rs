@@ -16,9 +16,9 @@
 #![comment = "Bindings to LevelDB"]
 #![license = "MIT"]
 #![crate_type = "lib"]
-#![warn(missing_doc)]
-#![warn(non_uppercase_statics)]
-#![warn(unnecessary_qualification)]
+#![warn(missing_docs)]
+#![warn(non_upper_case_globals)]
+#![warn(unused_qualifications)]
 #![feature(globs)]
 #![feature(unsafe_destructor)]
 
