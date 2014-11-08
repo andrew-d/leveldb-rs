@@ -1393,7 +1393,7 @@ mod tests {
     #[test]
     fn test_comparator_create() {
         let _c = DBComparator::new("comparator-create", |a, b| {
-            a.cmp(&b)
+            a.cmp(b)
         });
     }
 
@@ -1401,7 +1401,7 @@ mod tests {
     fn test_comparator() {
         let c = DBComparator::new("foo", |a, b| {
             // Compare inverse
-            b.cmp(&a)
+            b.cmp(a)
         });
 
         let mut opts = DBOptions::new().expect("error creating options");
