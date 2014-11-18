@@ -50,8 +50,8 @@ pub enum LevelDBError {
 impl std::fmt::Show for LevelDBError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> Result<(), std::fmt::FormatError> {
         match *self {
-            LibraryError(ref msg) => msg.fmt(f),
-            OutOfMemoryError      => write!(f, "Out of memory"),
+            LevelDBError::LibraryError(ref msg) => msg.fmt(f),
+            LevelDBError::OutOfMemoryError      => write!(f, "Out of memory"),
         }
     }
 }
@@ -64,7 +64,7 @@ impl LevelDBError {
         };
         unsafe { cffi::leveldb_free(errptr as *mut c_void) };
 
-        LibraryError(err)
+        LevelDBError::LibraryError(err)
     }
 }
 
@@ -840,7 +840,7 @@ impl DBSnapshot {
         // TODO: proper return code for OOM
         let opts = match DBReadOptions::new() {
             Some(o) => o,
-            None    => return Err(OutOfMemoryError),
+            None    => return Err(LevelDBError::OutOfMemoryError),
         };
 
         self.get_opts(key, opts)
@@ -863,7 +863,7 @@ impl DBSnapshot {
         // TODO: proper return code for OOM
         let mut opts = match DBReadOptions::new() {
             Some(o) => o,
-            None    => return Err(OutOfMemoryError),
+            None    => return Err(LevelDBError::OutOfMemoryError),
         };
 
         opts.set_snapshot(self.sn as *const cffi::leveldb_snapshot_t);
@@ -1056,7 +1056,7 @@ impl DB {
         // TODO: proper return code for OOM
         let opts = match DBOptions::new() {
             Some(o) => o,
-            None    => return Err(OutOfMemoryError),
+            None    => return Err(LevelDBError::OutOfMemoryError),
         };
 
         DB::open_with_opts(path, opts)
@@ -1069,7 +1069,7 @@ impl DB {
         // TODO: proper return code for OOM
         let mut opts = match DBOptions::new() {
             Some(o) => o,
-            None    => return Err(OutOfMemoryError),
+            None    => return Err(LevelDBError::OutOfMemoryError),
         };
 
         // TODO: can we remove a previously-existing database?
@@ -1098,7 +1098,7 @@ impl DB {
         // TODO: proper return code for OOM
         let opts = match DBWriteOptions::new() {
             Some(o) => o,
-            None    => return Err(OutOfMemoryError),
+            None    => return Err(LevelDBError::OutOfMemoryError),
         };
 
         self.put_opts(key, val, opts)
@@ -1121,7 +1121,7 @@ impl DB {
         // TODO: proper return code for OOM
         let opts = match DBWriteOptions::new() {
             Some(o) => o,
-            None    => return Err(OutOfMemoryError),
+            None    => return Err(LevelDBError::OutOfMemoryError),
         };
 
         self.delete_opts(key, opts)
@@ -1143,7 +1143,7 @@ impl DB {
         // TODO: proper return code for OOM
         let opts = match DBWriteOptions::new() {
             Some(o) => o,
-            None    => return Err(OutOfMemoryError),
+            None    => return Err(LevelDBError::OutOfMemoryError),
         };
 
         self.write_opts(batch, opts)
@@ -1166,7 +1166,7 @@ impl DB {
         // TODO: proper return code for OOM
         let opts = match DBReadOptions::new() {
             Some(o) => o,
-            None    => return Err(OutOfMemoryError),
+            None    => return Err(LevelDBError::OutOfMemoryError),
         };
 
         self.get_opts(key, opts)
@@ -1187,7 +1187,7 @@ impl DB {
         // TODO: proper return code for OOM
         let opts = match DBReadOptions::new() {
             Some(o) => o,
-            None    => return Err(OutOfMemoryError),
+            None    => return Err(LevelDBError::OutOfMemoryError),
         };
 
         Ok(self.db.iter(opts))
