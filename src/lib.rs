@@ -48,7 +48,7 @@ pub enum LevelDBError {
 }
 
 impl std::fmt::Show for LevelDBError {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> Result<(), std::fmt::FormatError> {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
         match *self {
             LevelDBError::LibraryError(ref msg) => msg.fmt(f),
             LevelDBError::OutOfMemoryError      => write!(f, "Out of memory"),
