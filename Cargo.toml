@@ -3,4 +3,4 @@
 name = "leveldb"
 version = "0.0.1"
 authors = ["Andrew Dunham <andrew@du.nham.ca>"]
-build = "make libs_for_cargo"
+build = "build.rs"
