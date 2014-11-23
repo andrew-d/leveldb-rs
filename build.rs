@@ -3,7 +3,7 @@ use std::os;
 use std::path::Path;
 
 const SNAPPY_VERSION: &'static str  = "1.1.2";
-const LEVELDB_VERSION: &'static str = "1.15.0";
+const LEVELDB_VERSION: &'static str = "1.18";
 
 
 fn main() {
