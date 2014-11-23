@@ -12,7 +12,7 @@
  *
  * And please be careful with write batches.  Patches are welcome!
  */
-#![crate_name = "leveldb"]
+#![crate_name = "leveldb-rs"]
 #![comment = "Bindings to LevelDB"]
 #![license = "MIT"]
 #![crate_type = "lib"]
