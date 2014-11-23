@@ -3,4 +3,11 @@
 name = "leveldb"
 version = "0.0.1"
 authors = ["Andrew Dunham <andrew@du.nham.ca>"]
+
+description = "Bindings to the LevelDB key/value storage library (https://github.com/google/leveldb)"
+documentation = "http://rust-ci.org/andrew-d/leveldb-rs/doc/leveldb/"
+repository = "https://github.com/andrew-d/leveldb-rs"
+keywords = ["bindings", "database", "leveldb"]
+license = "MIT"
+
 build = "build.rs"
