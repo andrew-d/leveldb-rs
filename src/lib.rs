@@ -13,8 +13,6 @@
  * And please be careful with write batches.  Patches are welcome!
  */
 #![crate_name = "leveldb-rs"]
-#![comment = "Bindings to LevelDB"]
-#![license = "MIT"]
 #![crate_type = "lib"]
 #![warn(missing_docs)]
 #![warn(non_upper_case_globals)]
@@ -60,7 +58,7 @@ impl LevelDBError {
     fn lib_error(errptr: *mut c_char) -> LevelDBError {
         // Convert to a rust String, then free the LevelDB string.
         let err = unsafe {
-            std::string::raw::from_buf(errptr as *const u8)
+            String::from_raw_buf(errptr as *const u8)
         };
         unsafe { cffi::leveldb_free(errptr as *mut c_void) };
 
@@ -68,6 +66,7 @@ impl LevelDBError {
     }
 }
 
+/// An alias for `Result<T, LevelDBError>`
 pub type LevelDBResult<T> = Result<T, LevelDBError>;
 
 // Convert a Path instance to a C-style string
@@ -937,7 +936,7 @@ impl DBImpl {
                     errptr
                 )
             }
-        }))
+        }));
 
         Ok(())
     }
@@ -953,7 +952,7 @@ impl DBImpl {
                     errptr
                 )
             }
-        }))
+        }));
 
         Ok(())
     }
@@ -968,7 +967,7 @@ impl DBImpl {
                     errptr
                 )
             }
-        }))
+        }));
 
         Ok(())
     }
@@ -1365,11 +1364,11 @@ mod tests {
         let t3 = it.next();
 
         // Keys are stored ordered, despite the fact we inserted unordered.
-        assert_eq!(t1.ref0().as_slice(), b"abc");
-        assert_eq!(t1.ref1().as_slice(), b"123");
+        assert_eq!((&t1.0).as_slice(), b"abc");
+        assert_eq!((&t1.1).as_slice(), b"123");
 
-        assert_eq!(t2.ref0().as_slice(), b"foo");
-        assert_eq!(t2.ref1().as_slice(), b"bar");
+        assert_eq!((&t2.0).as_slice(), b"foo");
+        assert_eq!((&t2.1).as_slice(), b"bar");
 
         assert!(t3.is_none());
     }
@@ -1384,10 +1383,10 @@ mod tests {
         let items: Vec<(Vec<u8>, Vec<u8>)> = db.iter().unwrap().alloc().collect();
 
         assert_eq!(items.len(), 2u);
-        assert_eq!(items[0].ref0().as_slice(), b"abc");
-        assert_eq!(items[0].ref1().as_slice(), b"123");
-        assert_eq!(items[1].ref0().as_slice(), b"foo");
-        assert_eq!(items[1].ref1().as_slice(), b"bar");
+        assert_eq!((&items[0].0).as_slice(), b"abc");
+        assert_eq!((&items[0].1).as_slice(), b"123");
+        assert_eq!((&items[1].0).as_slice(), b"foo");
+        assert_eq!((&items[1].1).as_slice(), b"bar");
     }
 
     #[test]
@@ -1426,10 +1425,10 @@ mod tests {
 
         // Values should be in reverse order.
         assert_eq!(items.len(), 2);
-        assert_eq!(items[0].ref0().as_slice(), b"zzzz");
-        assert_eq!(items[0].ref1().as_slice(), b"bar");
-        assert_eq!(items[1].ref0().as_slice(), b"aaaa");
-        assert_eq!(items[1].ref1().as_slice(), b"foo");
+        assert_eq!((&items[0].0).as_slice(), b"zzzz");
+        assert_eq!((&items[0].1).as_slice(), b"bar");
+        assert_eq!((&items[1].0).as_slice(), b"aaaa");
+        assert_eq!((&items[1].1).as_slice(), b"foo");
     }
 
     #[test]
@@ -1461,14 +1460,14 @@ mod tests {
         assert_eq!(iter_items.len(), 2);
         assert_eq!(db_items.len(), 2);
 
-        assert_eq!(iter_items[0].ref0().as_slice(), b"abc");
-        assert_eq!(iter_items[0].ref1().as_slice(), b"123");
-        assert_eq!(iter_items[1].ref0().as_slice(), b"foo");
-        assert_eq!(iter_items[1].ref1().as_slice(), b"bar");
+        assert_eq!((&iter_items[0].0).as_slice(), b"abc");
+        assert_eq!((&iter_items[0].1).as_slice(), b"123");
+        assert_eq!((&iter_items[1].0).as_slice(), b"foo");
+        assert_eq!((&iter_items[1].1).as_slice(), b"bar");
 
-        assert_eq!(db_items[0].ref0().as_slice(), b"abc");
-        assert_eq!(db_items[0].ref1().as_slice(), b"456");
-        assert_eq!(db_items[1].ref0().as_slice(), b"foo");
-        assert_eq!(db_items[1].ref1().as_slice(), b"bar");
+        assert_eq!((&db_items[0].0).as_slice(), b"abc");
+        assert_eq!((&db_items[0].1).as_slice(), b"456");
+        assert_eq!((&db_items[1].0).as_slice(), b"foo");
+        assert_eq!((&db_items[1].1).as_slice(), b"bar");
     }
 }
