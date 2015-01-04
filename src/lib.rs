@@ -17,15 +17,17 @@
 #![warn(missing_docs)]
 #![warn(non_upper_case_globals)]
 #![warn(unused_qualifications)]
+#![feature(associated_types)]
 #![feature(globs)]
 #![feature(unsafe_destructor)]
 
 extern crate libc;
 
+use std::cmp::Ordering;
+use std::mem::transmute;
 use std::ptr;
 use std::raw::Slice;
 use std::rc::Rc;
-use std::mem::transmute;
 
 use libc::{c_char, c_int, c_uchar, c_void};
 use libc::types::os::arch::c95::size_t;
@@ -36,7 +38,7 @@ mod ffi;
 
 
 /// Our error type
-#[deriving(Clone, Hash, PartialEq, Eq)]
+#[derive(Clone, Hash, PartialEq, Eq)]
 pub enum LevelDBError {
     /// An error from the LevelDB C library.
     LibraryError(String),
@@ -370,9 +372,9 @@ extern "C" fn comparator_compare_callback(state: *mut c_void, a: *const c_char, 
         //   == 0 iff "a" == "b",
         //   > 0 iff "a" > "b"
         match ((*cmp).cmp)(a_slice, b_slice) {
-            Less => -1,
-            Equal => 0,
-            Greater => 1,
+            Ordering::Less => -1,
+            Ordering::Equal => 0,
+            Ordering::Greater => 1,
         }
     }
 }
@@ -796,7 +798,9 @@ impl DBIteratorAlloc {
     }
 }
 
-impl Iterator<(Vec<u8>, Vec<u8>)> for DBIteratorAlloc {
+impl Iterator for DBIteratorAlloc {
+    type Item = (Vec<u8>, Vec<u8>);
+
     fn next(&mut self) -> Option<(Vec<u8>, Vec<u8>)> {
         match self.underlying.next() {
             Some((key, val)) => {
