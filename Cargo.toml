@@ -10,4 +10,6 @@ repository = "https://github.com/andrew-d/leveldb-rs"
 keywords = ["bindings", "database", "leveldb"]
 license = "MIT"
 
-build = "build.rs"
+[dependencies.leveldb-sys]
+path = "leveldb-sys"
+version = "0.0.1"
