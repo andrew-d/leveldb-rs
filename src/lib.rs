@@ -20,19 +20,20 @@
 #![feature(unsafe_destructor)]
 
 extern crate libc;
+extern crate "leveldb-sys" as leveldb_sys;
 
 use std::cmp::Ordering;
+use std::ffi::c_str_to_bytes;
 use std::mem::transmute;
 use std::ptr;
 use std::raw::Slice;
 use std::rc::Rc;
+use std::str;
 
 use libc::{c_char, c_int, c_uchar, c_void};
 use libc::types::os::arch::c95::size_t;
 
-use ffi::ffi as cffi;
-
-mod ffi;
+use leveldb_sys as cffi;
 
 
 /// Our error type
@@ -57,9 +58,9 @@ impl std::fmt::Show for LevelDBError {
 impl LevelDBError {
     fn lib_error(errptr: *mut c_char) -> LevelDBError {
         // Convert to a rust String, then free the LevelDB string.
-        let err = unsafe {
-            String::from_raw_buf(errptr as *const u8)
-        };
+        let p = errptr as *const c_char;
+        let slice = unsafe { c_str_to_bytes(&p) };
+        let err = str::from_utf8(slice).unwrap_or("Invalid error message").to_string();
         unsafe { cffi::leveldb_free(errptr as *mut c_void) };
 
         LevelDBError::LibraryError(err)
@@ -70,7 +71,9 @@ impl LevelDBError {
 pub type LevelDBResult<T> = Result<T, LevelDBError>;
 
 // Convert a Path instance to a C-style string
-fn path_as_c_str<T>(path: &Path, f: |*const i8| -> T) -> T {
+fn path_as_c_str<F, T>(path: &Path, mut f: F) -> T
+    where F: FnMut(*const i8) -> T
+{
     // First, convert the path to a vector...
     let mut pvec = path.as_vec().to_vec();
 
@@ -86,7 +89,9 @@ fn path_as_c_str<T>(path: &Path, f: |*const i8| -> T) -> T {
 
 // Provides an errptr for use with LevelDB, and properly returns a Result if
 // it's non-null.
-fn with_errptr<T>(f: |*mut *mut c_char| -> T) -> LevelDBResult<T> {
+fn with_errptr<F, T>(mut f: F) -> LevelDBResult<T>
+    where F: FnMut(*mut *mut c_char) -> T
+{
     let mut errptr: *mut c_char = ptr::null_mut();
 
     let ret = f(&mut errptr as *mut *mut c_char);
@@ -297,7 +302,7 @@ impl Drop for DBOptions {
  */
 struct DBComparatorState {
     name: &'static str,
-    cmp: |&[u8], &[u8]|: 'static -> Ordering,
+    cmp: Box<Fn(&[u8], &[u8]) -> Ordering + 'static>,
     ptr: *mut cffi::leveldb_comparator_t,
 }
 
@@ -319,10 +324,12 @@ impl DBComparator {
     /**
      * Create a new comparator with the given name and comparison function.
      */
-    pub fn new(name: &'static str, cmp: |&[u8], &[u8]|: 'static -> Ordering) -> DBComparator {
+    pub fn new<F: 'static>(name: &'static str, cmp: F) -> DBComparator
+        where F: Fn(&[u8], &[u8]) -> Ordering
+    {
         let mut state = box DBComparatorState {
             name: name,
-            cmp: cmp,
+            cmp: box cmp,
             ptr: ptr::null_mut(),
         };
 
@@ -586,10 +593,13 @@ impl DBWriteBatch {
      * Iterate over the contents of the write batch by calling callbacks for
      * each operation in the batch.
      */
-    pub fn iterate<'a>(&'a self, put: |&'a [u8], &'a [u8]|: 'a, delete: |&'a [u8]|: 'a) {
+    pub fn iterate<'a, F: 'a, G: 'a>(&'a self, put: F, delete: G)
+        where F: FnMut<(&'a [u8], &'a [u8]), ()> + 'a,
+              G: FnMut<(&'a [u8],), ()> + 'a,
+    {
         let mut it = DBWriteBatchIter {
-            put: put,
-            delete: delete,
+            put:    box put,
+            delete: box delete,
         };
 
         unsafe {
@@ -604,8 +614,8 @@ impl DBWriteBatch {
 }
 
 struct DBWriteBatchIter<'a> {
-    pub put:    |&'a [u8], &'a [u8]|: 'a,
-    pub delete: |&'a [u8]|: 'a,
+    pub put:    Box<FnMut(&'a [u8], &'a [u8]) + 'a>,
+    pub delete: Box<FnMut(&'a [u8]) + 'a>,
 }
 
 // Callback for DBWriteBatchIter
@@ -908,8 +918,8 @@ struct DBImpl {
 
 impl DBImpl {
     fn open(path: &Path, opts: DBOptions) -> LevelDBResult<DBImplPtr> {
-        let res = path_as_c_str(path, |path| {
-            with_errptr(|errptr| {
+        let res = path_as_c_str(path, |&mut: path| {
+            with_errptr(|&mut: errptr| {
                 unsafe { cffi::leveldb_open(opts.ptr(), path, errptr) }
             })
         });
@@ -926,7 +936,7 @@ impl DBImpl {
     }
 
     fn put(&self, key: &[u8], val: &[u8], opts: DBWriteOptions) -> LevelDBResult<()> {
-        try!(with_errptr(|errptr| {
+        try!(with_errptr(|&mut: errptr| {
             unsafe {
                 cffi::leveldb_put(
                     self.db,
@@ -944,7 +954,7 @@ impl DBImpl {
     }
 
     fn delete(&self, key: &[u8], opts: DBWriteOptions) -> LevelDBResult<()> {
-        try!(with_errptr(|errptr| {
+        try!(with_errptr(|&mut: errptr| {
             unsafe {
                 cffi::leveldb_delete(
                     self.db,
@@ -960,7 +970,7 @@ impl DBImpl {
     }
 
     fn write(&self, batch: DBWriteBatch, opts: DBWriteOptions) -> LevelDBResult<()> {
-        try!(with_errptr(|errptr| {
+        try!(with_errptr(|&mut: errptr| {
             unsafe {
                 cffi::leveldb_write(
                     self.db,
@@ -977,7 +987,7 @@ impl DBImpl {
     fn get(&self, key: &[u8], opts: DBReadOptions) -> LevelDBResult<Option<Vec<u8>>> {
         let mut size: size_t = 0;
 
-        let buff = try!(with_errptr(|errptr| {
+        let buff = try!(with_errptr(|&mut: errptr| {
             unsafe {
                 cffi::leveldb_get(
                     self.db,
@@ -1217,9 +1227,9 @@ mod tests {
     extern crate test;
 
     use std::io::TempDir;
+    use leveldb_sys as ffi;
 
     use super::{DB, DBComparator, DBOptions, DBReadOptions, DBWriteBatch};
-    use super::ffi::ffi;
 
     fn new_temp_db(name: &str) -> DB {
         let tdir = match TempDir::new(name) {
@@ -1321,9 +1331,9 @@ mod tests {
         let mut puts: Vec<(Vec<u8>, Vec<u8>)> = vec![];
         let mut deletes: Vec<Vec<u8>> = vec![];
 
-        batch.iterate(|k, v| {
+        batch.iterate(|&mut: k, v| {
             puts.push((k.to_vec(), v.to_vec()));
-        }, |k| {
+        }, |&mut: k| {
             deletes.push(k.to_vec());
         });
 
