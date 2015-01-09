@@ -1,7 +1,7 @@
 [package]
 
 name = "leveldb-rs"
-version = "0.0.2"
+version = "0.0.3"
 authors = ["Andrew Dunham <andrew@du.nham.ca>"]
 
 description = "Bindings to the LevelDB key/value storage library (https://github.com/google/leveldb)"
@@ -9,6 +9,9 @@ documentation = "http://rust-ci.org/andrew-d/leveldb-rs/doc/leveldb/"
 repository = "https://github.com/andrew-d/leveldb-rs"
 keywords = ["bindings", "database", "leveldb"]
 license = "MIT"
+
+[features]
+snappy = ["leveldb-sys/snappy"]
 
 [dependencies.leveldb-sys]
 path = "leveldb-sys"
