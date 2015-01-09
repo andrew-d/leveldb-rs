@@ -211,7 +211,7 @@ impl DBOptions {
      *
      * Default: 4MiB
      */
-    pub fn set_write_buffer_size(&mut self, val: uint) -> &mut DBOptions {
+    pub fn set_write_buffer_size(&mut self, val: usize) -> &mut DBOptions {
         unsafe {
             cffi::leveldb_options_set_write_buffer_size(self.opts, val as size_t);
         }
@@ -225,7 +225,7 @@ impl DBOptions {
      *
      * Default: 1000
      */
-    pub fn set_max_open_files(&mut self, val: int) -> &mut DBOptions {
+    pub fn set_max_open_files(&mut self, val: isize) -> &mut DBOptions {
         unsafe {
             cffi::leveldb_options_set_max_open_files(self.opts, val as c_int);
         }
@@ -239,7 +239,7 @@ impl DBOptions {
      *
      * Default: 4KB
      */
-    pub fn set_block_size(&mut self, val: uint) -> &mut DBOptions {
+    pub fn set_block_size(&mut self, val: usize) -> &mut DBOptions {
         unsafe {
             cffi::leveldb_options_set_block_size(self.opts, val as size_t);
         }
@@ -253,7 +253,7 @@ impl DBOptions {
      *
      * Default: 16
      */
-    pub fn set_block_restart_interval(&mut self, val: int) -> &mut DBOptions {
+    pub fn set_block_restart_interval(&mut self, val: isize) -> &mut DBOptions {
         unsafe {
             cffi::leveldb_options_set_block_restart_interval(self.opts, val as c_int);
         }
@@ -327,11 +327,11 @@ impl DBComparator {
     pub fn new<F: 'static>(name: &'static str, cmp: F) -> DBComparator
         where F: Fn(&[u8], &[u8]) -> Ordering
     {
-        let mut state = box DBComparatorState {
+        let mut state = Box::new(DBComparatorState {
             name: name,
-            cmp: box cmp,
+            cmp: Box::new(cmp),
             ptr: ptr::null_mut(),
-        };
+        });
 
         let ptr = unsafe {
             cffi::leveldb_comparator_create(
@@ -363,12 +363,12 @@ extern "C" fn comparator_compare_callback(state: *mut c_void, a: *const c_char, 
 
         let a_slice = transmute(Slice {
             data: a,
-            len:  alen as uint,
+            len:  alen as usize,
         });
 
         let b_slice = transmute(Slice {
             data: b,
-            len:  blen as uint,
+            len:  blen as usize,
         });
 
         // Comment from include/leveldb/comparator.h:
@@ -598,8 +598,8 @@ impl DBWriteBatch {
               G: FnMut<(&'a [u8],), ()> + 'a,
     {
         let mut it = DBWriteBatchIter {
-            put:    box put,
-            delete: box delete,
+            put:    Box::new(put),
+            delete: Box::new(delete),
         };
 
         unsafe {
@@ -625,14 +625,14 @@ extern "C" fn writebatch_put_callback(state: *mut c_void, key: *const c_char, kl
     let key_slice = unsafe {
         transmute(Slice {
             data: key,
-            len:  klen as uint,
+            len:  klen as usize,
         })
     };
 
     let val_slice = unsafe {
         transmute(Slice {
             data: val,
-            len:  vlen as uint,
+            len:  vlen as usize,
         })
     };
 
@@ -646,7 +646,7 @@ extern "C" fn writebatch_delete_callback(state: *mut c_void, key: *const c_char,
     let key_slice = unsafe {
         transmute(Slice {
             data: key,
-            len:  klen as uint,
+            len:  klen as usize,
         })
     };
 
@@ -693,7 +693,7 @@ impl DBIterator {
 
             transmute(Slice {
                 data: key,
-                len:  keylen as uint,
+                len:  keylen as usize,
             })
         };
 
@@ -704,7 +704,7 @@ impl DBIterator {
 
             transmute(Slice {
                 data: val,
-                len:  vallen as uint,
+                len:  vallen as usize,
             })
         };
 
@@ -1004,7 +1004,7 @@ impl DBImpl {
             return Ok(None)
         }
 
-        let size = size as uint;
+        let size = size as usize;
 
         // TODO: should investigate whether we can avoid another copy
         // perhaps use std::c_vec::CVec?
@@ -1234,12 +1234,12 @@ mod tests {
     fn new_temp_db(name: &str) -> DB {
         let tdir = match TempDir::new(name) {
             Ok(t)    => t,
-            Err(why) => panic!("Error creating temp dir: {}", why),
+            Err(why) => panic!("Error creating temp dir: {:?}", why),
         };
 
         match DB::create(tdir.path()) {
             Ok(db)   => db,
-            Err(why) => panic!("Error creating DB: {}", why),
+            Err(why) => panic!("Error creating DB: {:?}", why),
         }
     }
 
@@ -1256,12 +1256,12 @@ mod tests {
     fn test_can_create() {
         let tdir = match TempDir::new("create") {
             Ok(t)    => t,
-            Err(why) => panic!("Error creating temp dir: {}", why),
+            Err(why) => panic!("Error creating temp dir: {:?}", why),
         };
 
         let _db = match DB::create(tdir.path()) {
             Ok(db)   => db,
-            Err(why) => panic!("Error creating DB: {}", why),
+            Err(why) => panic!("Error creating DB: {:?}", why),
         };
     }
 
@@ -1271,7 +1271,7 @@ mod tests {
 
         match db.put(b"foo", b"bar") {
             Ok(_)    => {},
-            Err(why) => panic!("Error putting into DB: {}", why),
+            Err(why) => panic!("Error putting into DB: {:?}", why),
         };
     }
 
@@ -1281,12 +1281,12 @@ mod tests {
 
         match db.put(b"foo", b"bar") {
             Ok(_)    => {},
-            Err(why) => panic!("Error putting into DB: {}", why),
+            Err(why) => panic!("Error putting into DB: {:?}", why),
         };
 
         match db.get(b"foo") {
             Ok(v)    => assert_eq!(v.expect("Value not found").as_slice(), b"bar"),
-            Err(why) => panic!("Error getting from DB: {}", why),
+            Err(why) => panic!("Error getting from DB: {:?}", why),
         };
     }
 
@@ -1303,7 +1303,7 @@ mod tests {
 
         match db.delete(b"foo") {
             Ok(_)    => {},
-            Err(why) => panic!("Error deleting from DB: {}", why),
+            Err(why) => panic!("Error deleting from DB: {:?}", why),
         }
 
         assert_eq!(db.get(b"foo").unwrap(), None);
@@ -1344,7 +1344,7 @@ mod tests {
 
         match db.write(batch) {
             Ok(_)    => {},
-            Err(why) => panic!("Error writing to DB: {}", why),
+            Err(why) => panic!("Error writing to DB: {:?}", why),
         };
 
         assert_eq!(db.get(b"foo").unwrap().expect("Value not found").as_slice(), b"bar");
@@ -1394,7 +1394,7 @@ mod tests {
 
         let items: Vec<(Vec<u8>, Vec<u8>)> = db.iter().unwrap().alloc().collect();
 
-        assert_eq!(items.len(), 2u);
+        assert_eq!(items.len(), 2us);
         assert_eq!((&items[0].0).as_slice(), b"abc");
         assert_eq!((&items[0].1).as_slice(), b"123");
         assert_eq!((&items[1].0).as_slice(), b"foo");
@@ -1420,12 +1420,12 @@ mod tests {
 
         let tdir = match TempDir::new("comparator") {
             Ok(t)    => t,
-            Err(why) => panic!("Error creating temp dir: {}", why),
+            Err(why) => panic!("Error creating temp dir: {:?}", why),
         };
 
         let mut db = match DB::open_with_opts(tdir.path(), opts) {
             Ok(db)   => db,
-            Err(why) => panic!("Error creating DB: {}", why),
+            Err(why) => panic!("Error creating DB: {:?}", why),
         };
 
         // Insert into the DB some values.
@@ -1456,13 +1456,13 @@ mod tests {
 
         let snap_val = match snap.get(b"abc") {
             Ok(val) => val.expect("Expected to find key 'abc'"),
-            Err(why) => panic!("Error getting from DB: {}", why),
+            Err(why) => panic!("Error getting from DB: {:?}", why),
         };
         assert!(snap_val.as_slice() == b"123");
 
         let val = match db.get(b"abc") {
             Ok(val) => val.expect("Expected to find key 'abc'"),
-            Err(why) => panic!("Error getting from DB: {}", why),
+            Err(why) => panic!("Error getting from DB: {:?}", why),
         };
         assert!(val.as_slice() == b"456");
 
