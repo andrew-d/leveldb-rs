@@ -595,8 +595,8 @@ impl DBWriteBatch {
      * each operation in the batch.
      */
     pub fn iterate<'a, F: 'a, G: 'a>(&'a self, put: F, delete: G)
-        where F: FnMut<(&'a [u8], &'a [u8]), ()> + 'a,
-              G: FnMut<(&'a [u8],), ()> + 'a,
+        where F: FnMut(&'a [u8], &'a [u8]) + 'a,
+              G: FnMut(&'a [u8]) + 'a,
     {
         let mut it = DBWriteBatchIter {
             put:    Box::new(put),
