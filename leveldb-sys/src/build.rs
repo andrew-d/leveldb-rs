@@ -1,8 +1,11 @@
-use std::collections::HashMap;
-use std::ffi::CString;
-use std::io::{BufferedReader, Command, File, fs};
-use std::os;
+use std::env;
+use std::io::{BufReader, BufRead, Write};
+use std::path::PathBuf;
+use std::process::Command;
+use std::fs::{self, File};
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
+
 
 const SNAPPY_VERSION: &'static str  = "1.1.2";
 const LEVELDB_VERSION: &'static str = "1.18";
@@ -16,24 +19,27 @@ fn build_snappy() {
 
     // Clean the build directory first.
     println!("[snappy] Cleaning");
-    Command::new("make").args(&["-C", snappy_path.as_str().unwrap()])
+    Command::new("make").arg("-C")
+                        .arg(&snappy_path)
                         .arg("distclean")
                         .status().unwrap();
 
     // Configure the build
     println!("[snappy] Configuring");
-    Command::new("./configure").cwd(&snappy_path)
+    Command::new("./configure").current_dir(&snappy_path)
                                .arg("CXXFLAGS=-fPIC")
                                .status().unwrap();
 
     // Call "make" to build the C library
     println!("[snappy] Building");
-    Command::new("make").args(&["-C", snappy_path.as_str().unwrap()])
+    Command::new("make").arg("-C")
+                        .arg(&snappy_path)
                         .status().unwrap();
 
     // Step 2: Copy to output directories
     // ----------------------------------------------------------------------
-    let out_dir = Path::new(os::getenv("OUT_DIR").unwrap());
+    let mut out_dir = PathBuf::new();
+    out_dir.push(env::var("OUT_DIR").unwrap());
 
     println!("[build] Copying output files");
     fs::copy(&snappy_path.join(".libs").join("libsnappy.a"), &out_dir.join("libsnappy.a")).unwrap();
@@ -47,60 +53,65 @@ fn build_leveldb(with_snappy: bool) {
 
     // Clean the build directory first.
     println!("[leveldb] Cleaning");
-    Command::new("make").args(&["-C", leveldb_path.as_str().unwrap()])
+    Command::new("make").arg("-C")
+                        .arg(&leveldb_path)
                         .arg("clean")
                         .status().unwrap();
+
+    // Our command builder
+    let mut cmd = Command::new("make");
+    let mut pbuild: &mut Command = &mut cmd
+            .arg("-C")
+            .arg(&leveldb_path);
 
     // Set up the process environment.  We essentially clone the existing
     // environment, and, if we're including Snappy, also include the appropriate
     // CXXFLAGS and LDFLAGS variables.
-    let mut env_map: HashMap<CString, CString> = os::env_as_bytes().into_iter().map(|(k, v)| {
-        (
-            CString::from_slice(k.as_slice()),
-            CString::from_slice(v.as_slice())
-        )
-    }).collect();
-
-    if with_snappy {
-        let linker_path = os::getenv("OUT_DIR").unwrap();
-        env_map.insert(
-            CString::from_slice("LDFLAGS".as_bytes()),
-            CString::from_slice(format!("-L{}", linker_path).as_bytes())
-        );
-
-        let snappy_path = Path::new("deps")
-                               .join(format!("snappy-{}", SNAPPY_VERSION));
-        env_map.insert(
-            CString::from_slice("CXXFLAGS".as_bytes()),
-            CString::from_slice(format!("-I{} -fPIC", snappy_path.as_str().unwrap()).as_bytes())
-        );
-    } else {
-        env_map.insert(
-            CString::from_slice("CXXFLAGS".as_bytes()),
-            CString::from_slice(format!("-fPIC").as_bytes())
-        );
+    for (key, val) in env::vars() {
+        // TODO: this is ugly :'(
+        let mut tmp = pbuild;
+        let tmp2 = tmp.env(key, val);
+        pbuild = tmp2;
     }
 
-    // Convert to the format that `env_set_all` is expecting.
-    let env_arr: Vec<(CString, CString)> = env_map.into_iter().collect();
+    if with_snappy {
+        {
+            // TODO: this is ugly :'(
+            let linker_path = env::var("OUT_DIR").unwrap();
+            let mut tmp = pbuild;
+            let tmp2 = tmp.env("LDFLAGS", format!("-L{}", linker_path));
+            pbuild = tmp2;
+        }
+
+        {
+            // TODO: this is ugly :'(
+            let snappy_path = Path::new("deps")
+                                   .join(format!("snappy-{}", SNAPPY_VERSION));
+            let mut tmp = pbuild;
+            let tmp2 = tmp.env("CXXFLAGS", format!("-I{} -fPIC", snappy_path.to_string_lossy()));
+            pbuild = tmp2;
+        }
+    } else {
+        // TODO: this is ugly :'(
+        let mut tmp = pbuild;
+        let tmp2 = tmp.env("CXXFLAGS", "-fPIC");
+        pbuild = tmp2;
+    }
 
     // Build the library
     println!("[leveldb] Building");
-    let mut pp = Command::new("make")
-            .args(&["-C", leveldb_path.as_str().unwrap()])
-            .env_set_all(env_arr.as_slice())
-            .spawn().unwrap();
-    let stdout_buff = pp.stdout.as_mut().unwrap().read_to_end().unwrap();
-    let stdout = String::from_utf8_lossy(stdout_buff.as_slice());
-    println!("[leveldb] Process stdout = \"{}\"", stdout.escape_default());
-
-    let stderr_buff = pp.stderr.as_mut().unwrap().read_to_end().unwrap();
-    let stderr = String::from_utf8_lossy(stderr_buff.as_slice());
-    println!("[leveldb] Process stderr = \"{}\"", stderr.escape_default());
+    let stat = pbuild.status().unwrap_or_else(|e| {
+        panic!("failed to execute process: {}", e)
+    });
+    if !stat.success() {
+        panic!("[leveldb] process exited with non-zero status: {}", stat);
+    }
+    println!("[leveldb] Build complete: {}", stat);
 
     // Step 2: Copy to output directories
     // ----------------------------------------------------------------------
-    let out_dir = Path::new(os::getenv("OUT_DIR").unwrap());
+    let mut out_dir = PathBuf::new();
+    out_dir.push(env::var("OUT_DIR").unwrap());
 
     println!("[build] Copying output files");
     fs::copy(&leveldb_path.join("libleveldb.a"), &out_dir.join("libleveldb.a")).unwrap();
@@ -109,7 +120,7 @@ fn build_leveldb(with_snappy: bool) {
 fn main() {
     println!("[build] Started");
 
-    let have_snappy = os::getenv("CARGO_FEATURE_SNAPPY").is_some();
+    let have_snappy = env::var_os("CARGO_FEATURE_SNAPPY").is_some();
 
     // If we have the appropriate feature, then we build snappy.
     if have_snappy {
@@ -132,14 +143,14 @@ fn main() {
         // build_detect_platform that enable Snappy.  This prevents us from
         // picking up a system-local copy of Snappy.
         let new_lines: Vec<String> = {
-            let mut file = BufferedReader::new(File::open(&template_path));
+            let file = BufReader::new(File::open(&template_path).unwrap());
 
             file.lines().map(|line| {
                 let line = line.unwrap();
                 if line.contains("-DSNAPPY") || line.contains("-lsnappy") {
                     let mut tmp = String::new();
                     tmp.push_str("true   #");
-                    tmp.push_str(line.as_slice());
+                    tmp.push_str(&*line);
                     tmp
                 } else {
                     line
@@ -147,22 +158,24 @@ fn main() {
             }).collect()
         };
 
-        let mut f = File::create(&detect_path);
+        let mut f = fs::OpenOptions::new()
+                        .create(true)
+                        .write(true)
+                        .mode(0o755)
+                        .open(&detect_path)
+                        .unwrap();
         for line in new_lines.iter() {
-            f.write_str(line.as_slice()).unwrap();
+            write!(f, "{}\n", line).unwrap();
         }
 
         println!("[build] Patching complete");
     }
 
-    // Set executable bits on the file
-    fs::chmod(&detect_path, std::io::USER_EXEC).unwrap();
-
     // Build LevelDB
     build_leveldb(have_snappy);
 
     // Print the appropriate linker flags
-    let out_dir = os::getenv("OUT_DIR").unwrap();
+    let out_dir = env::var("OUT_DIR").unwrap();
     let linker_flags = if have_snappy {
         "-l static=snappy -l static=leveldb -l stdc++"
     } else {

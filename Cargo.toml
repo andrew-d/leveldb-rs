@@ -12,7 +12,14 @@ license = "MIT"
 
 [features]
 snappy = ["leveldb-sys/snappy"]
+raw = []
+
+[dependencies]
+libc = "*"
 
 [dependencies.leveldb-sys]
 path = "leveldb-sys"
 version = "0.0.2"
+
+[dev-dependencies]
+tempdir = "*"
