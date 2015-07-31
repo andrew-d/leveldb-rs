@@ -12,21 +12,20 @@
  *
  * And please be careful with write batches.  Patches are welcome!
  */
-#![crate_name = "leveldb-rs"]
 #![crate_type = "lib"]
 #![warn(missing_docs)]
 #![warn(non_upper_case_globals)]
 #![warn(unused_qualifications)]
-#![feature(unsafe_destructor)]
 
 extern crate libc;
-extern crate "leveldb-sys" as leveldb_sys;
+extern crate leveldb_sys;
 
 use std::cmp::Ordering;
-use std::ffi::c_str_to_bytes;
+use std::ffi::{CStr,CString};
+use std::path::Path;
 use std::mem::transmute;
 use std::ptr;
-use std::raw::Slice;
+use std::slice;
 use std::rc::Rc;
 use std::str;
 
@@ -37,7 +36,7 @@ use leveldb_sys as cffi;
 
 
 /// Our error type
-#[derive(Clone, Hash, PartialEq, Eq)]
+#[derive(Clone, Hash, PartialEq, Eq, Debug)]
 pub enum LevelDBError {
     /// An error from the LevelDB C library.
     LibraryError(String),
@@ -46,7 +45,7 @@ pub enum LevelDBError {
     OutOfMemoryError,
 }
 
-impl std::fmt::Show for LevelDBError {
+impl std::fmt::Display for LevelDBError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
         match *self {
             LevelDBError::LibraryError(ref msg) => msg.fmt(f),
@@ -59,8 +58,8 @@ impl LevelDBError {
     fn lib_error(errptr: *mut c_char) -> LevelDBError {
         // Convert to a rust String, then free the LevelDB string.
         let p = errptr as *const c_char;
-        let slice = unsafe { c_str_to_bytes(&p) };
-        let err = str::from_utf8(slice).unwrap_or("Invalid error message").to_string();
+        let slice = unsafe { CStr::from_ptr(p) };
+        let err = str::from_utf8(slice.to_bytes()).unwrap_or("Invalid error message").to_string();
         unsafe { cffi::leveldb_free(errptr as *mut c_void) };
 
         LevelDBError::LibraryError(err)
@@ -69,23 +68,6 @@ impl LevelDBError {
 
 /// An alias for `Result<T, LevelDBError>`
 pub type LevelDBResult<T> = Result<T, LevelDBError>;
-
-// Convert a Path instance to a C-style string
-fn path_as_c_str<F, T>(path: &Path, mut f: F) -> T
-    where F: FnMut(*const i8) -> T
-{
-    // First, convert the path to a vector...
-    let mut pvec = path.as_vec().to_vec();
-
-    // ... and ensure that it's null-terminated.
-    if pvec[pvec.len() - 1] != 0 {
-        pvec.push(0);
-    }
-
-    // Now, call the function with the new path pointer.
-    // This also returns what the function does.
-    f(pvec.as_ptr() as *const i8)
-}
 
 // Provides an errptr for use with LevelDB, and properly returns a Result if
 // it's non-null.
@@ -288,7 +270,6 @@ impl DBOptions {
     }
 }
 
-#[unsafe_destructor]
 impl Drop for DBOptions {
     fn drop(&mut self) {
         unsafe { cffi::leveldb_options_destroy(self.opts) };
@@ -307,7 +288,6 @@ struct DBComparatorState {
     ptr: *mut cffi::leveldb_comparator_t,
 }
 
-#[unsafe_destructor]
 impl Drop for DBComparatorState {
     fn drop(&mut self) {
         unsafe { cffi::leveldb_comparator_destroy(self.ptr) };
@@ -362,15 +342,8 @@ extern "C" fn comparator_compare_callback(state: *mut c_void, a: *const c_char, 
         // This is only safe since Box<T> is implemented as `struct Box(*mut T)`
         let cmp: *const DBComparatorState = transmute(state);
 
-        let a_slice = transmute(Slice {
-            data: a,
-            len:  alen as usize,
-        });
-
-        let b_slice = transmute(Slice {
-            data: b,
-            len:  blen as usize,
-        });
+        let a_slice = slice::from_raw_parts::<u8>(a as *const u8, alen as usize);
+        let b_slice = slice::from_raw_parts::<u8>(b as *const u8, blen as usize);
 
         // Comment from include/leveldb/comparator.h:
         // Three-way comparison.  Returns value:
@@ -624,17 +597,10 @@ extern "C" fn writebatch_put_callback(state: *mut c_void, key: *const c_char, kl
     let it = state as *mut DBWriteBatchIter;
 
     let key_slice = unsafe {
-        transmute(Slice {
-            data: key,
-            len:  klen as usize,
-        })
+        slice::from_raw_parts::<u8>(key as *const u8, klen as usize)
     };
-
     let val_slice = unsafe {
-        transmute(Slice {
-            data: val,
-            len:  vlen as usize,
-        })
+        slice::from_raw_parts::<u8>(val as *const u8, vlen as usize)
     };
 
     unsafe { ((*it).put)(key_slice, val_slice) };
@@ -645,10 +611,7 @@ extern "C" fn writebatch_delete_callback(state: *mut c_void, key: *const c_char,
     let it = state as *mut DBWriteBatchIter;
 
     let key_slice = unsafe {
-        transmute(Slice {
-            data: key,
-            len:  klen as usize,
-        })
+        slice::from_raw_parts::<u8>(key as *const u8, klen as usize)
     };
 
     unsafe { ((*it).delete)(key_slice) };
@@ -692,10 +655,7 @@ impl DBIterator {
             let key = cffi::leveldb_iter_key(self.ptr(),
                 &mut keylen as *mut size_t);
 
-            transmute(Slice {
-                data: key,
-                len:  keylen as usize,
-            })
+            slice::from_raw_parts::<u8>(key as *const u8, keylen as usize)
         };
 
         let val_slice = unsafe {
@@ -703,10 +663,7 @@ impl DBIterator {
             let val = cffi::leveldb_iter_value(
                 self.ptr(), &mut vallen as *mut size_t);
 
-            transmute(Slice {
-                data: val,
-                len:  vallen as usize,
-            })
+            slice::from_raw_parts::<u8>(val as *const u8, vallen as usize)
         };
 
         unsafe { cffi::leveldb_iter_next(self.iter) };
@@ -884,7 +841,6 @@ impl DBSnapshot {
 
 }
 
-#[unsafe_destructor]
 impl Drop for DBSnapshot {
     fn drop(&mut self) {
         unsafe {
@@ -919,10 +875,9 @@ struct DBImpl {
 
 impl DBImpl {
     fn open(path: &Path, opts: DBOptions) -> LevelDBResult<DBImplPtr> {
-        let res = path_as_c_str(path, |&mut: path| {
-            with_errptr(|&mut: errptr| {
-                unsafe { cffi::leveldb_open(opts.ptr(), path, errptr) }
-            })
+        let res = with_errptr(|errptr| {
+            let c_string = CString::new(path.to_str().unwrap()).unwrap();
+            unsafe { cffi::leveldb_open(opts.ptr(), c_string.as_ptr(), errptr) }
         });
 
         let db = match res {
@@ -937,7 +892,7 @@ impl DBImpl {
     }
 
     fn put(&self, key: &[u8], val: &[u8], opts: DBWriteOptions) -> LevelDBResult<()> {
-        try!(with_errptr(|&mut: errptr| {
+        try!(with_errptr(|errptr| {
             unsafe {
                 cffi::leveldb_put(
                     self.db,
@@ -955,7 +910,7 @@ impl DBImpl {
     }
 
     fn delete(&self, key: &[u8], opts: DBWriteOptions) -> LevelDBResult<()> {
-        try!(with_errptr(|&mut: errptr| {
+        try!(with_errptr(|errptr| {
             unsafe {
                 cffi::leveldb_delete(
                     self.db,
@@ -971,7 +926,7 @@ impl DBImpl {
     }
 
     fn write(&self, batch: DBWriteBatch, opts: DBWriteOptions) -> LevelDBResult<()> {
-        try!(with_errptr(|&mut: errptr| {
+        try!(with_errptr(|errptr| {
             unsafe {
                 cffi::leveldb_write(
                     self.db,
@@ -988,7 +943,7 @@ impl DBImpl {
     fn get(&self, key: &[u8], opts: DBReadOptions) -> LevelDBResult<Option<Vec<u8>>> {
         let mut size: size_t = 0;
 
-        let buff = try!(with_errptr(|&mut: errptr| {
+        let buff = try!(with_errptr(|errptr| {
             unsafe {
                 cffi::leveldb_get(
                     self.db,
@@ -1007,23 +962,9 @@ impl DBImpl {
 
         let size = size as usize;
 
-        // TODO: should investigate whether we can avoid another copy
-        // perhaps use std::c_vec::CVec?
-        let mut ret = Vec::with_capacity(size);
+        let vec: Vec<u8> = unsafe { slice::from_raw_parts(buff as *mut u8, size).to_vec() };
 
-        unsafe {
-            std::ptr::copy_nonoverlapping_memory(
-                ret.as_mut_ptr(),
-                buff as *const u8,
-                size
-            );
-
-            ret.set_len(size);
-
-            cffi::leveldb_free(buff as *mut c_void);
-        }
-
-        Ok(Some(ret))
+        Ok(Some(vec))
     }
 
     fn iter(&self, opts: DBReadOptions) -> DBIterator {
@@ -1038,7 +979,6 @@ impl DBImpl {
     }
 }
 
-#[unsafe_destructor]
 impl Drop for DBImpl {
     fn drop(&mut self) {
         unsafe {
@@ -1225,9 +1165,9 @@ impl DB {
 mod tests {
     #![allow(unused_imports)]
 
-    extern crate test;
+    extern crate tempdir;
 
-    use std::io::TempDir;
+    use self::tempdir::TempDir;
     use leveldb_sys as ffi;
 
     use super::{DB, DBComparator, DBOptions, DBReadOptions, DBWriteBatch};
@@ -1286,7 +1226,7 @@ mod tests {
         };
 
         match db.get(b"foo") {
-            Ok(v)    => assert_eq!(v.expect("Value not found").as_slice(), b"bar"),
+            Ok(v)    => assert_eq!(v.expect("Value not found"), b"bar"),
             Err(why) => panic!("Error getting from DB: {:?}", why),
         };
     }
@@ -1299,8 +1239,8 @@ mod tests {
         db.put(b"abc", b"123").unwrap();
 
         // Note: get --> unwrap Result --> expect Option --> convert Vec to slice
-        assert_eq!(db.get(b"foo").unwrap().expect("Value not found").as_slice(), b"bar");
-        assert_eq!(db.get(b"abc").unwrap().expect("Value not found").as_slice(), b"123");
+        assert_eq!(db.get(b"foo").unwrap().expect("Value not found"), b"bar");
+        assert_eq!(db.get(b"abc").unwrap().expect("Value not found"), b"123");
 
         match db.delete(b"foo") {
             Ok(_)    => {},
@@ -1308,7 +1248,7 @@ mod tests {
         }
 
         assert_eq!(db.get(b"foo").unwrap(), None);
-        assert_eq!(db.get(b"abc").unwrap().expect("Value not found").as_slice(), b"123");
+        assert_eq!(db.get(b"abc").unwrap().expect("Value not found"), b"123");
     }
 
     #[test]
@@ -1332,9 +1272,9 @@ mod tests {
         let mut puts: Vec<(Vec<u8>, Vec<u8>)> = vec![];
         let mut deletes: Vec<Vec<u8>> = vec![];
 
-        batch.iterate(|&mut: k, v| {
+        batch.iterate(|k, v| {
             puts.push((k.to_vec(), v.to_vec()));
-        }, |&mut: k| {
+        }, |k| {
             deletes.push(k.to_vec());
         });
 
@@ -1348,9 +1288,9 @@ mod tests {
             Err(why) => panic!("Error writing to DB: {:?}", why),
         };
 
-        assert_eq!(db.get(b"foo").unwrap().expect("Value not found").as_slice(), b"bar");
-        assert_eq!(db.get(b"def").unwrap().expect("Value not found").as_slice(), b"456");
-        assert_eq!(db.get(b"zzz").unwrap().expect("Value not found").as_slice(), b"qwerty");
+        assert_eq!(db.get(b"foo").unwrap().expect("Value not found"), b"bar");
+        assert_eq!(db.get(b"def").unwrap().expect("Value not found"), b"456");
+        assert_eq!(db.get(b"zzz").unwrap().expect("Value not found"), b"qwerty");
     }
 
     #[test]
@@ -1377,11 +1317,11 @@ mod tests {
         let t3 = it.next();
 
         // Keys are stored ordered, despite the fact we inserted unordered.
-        assert_eq!((&t1.0).as_slice(), b"abc");
-        assert_eq!((&t1.1).as_slice(), b"123");
+        assert_eq!((&t1.0), b"abc");
+        assert_eq!((&t1.1), b"123");
 
-        assert_eq!((&t2.0).as_slice(), b"foo");
-        assert_eq!((&t2.1).as_slice(), b"bar");
+        assert_eq!((&t2.0), b"foo");
+        assert_eq!((&t2.1), b"bar");
 
         assert!(t3.is_none());
     }
@@ -1395,11 +1335,11 @@ mod tests {
 
         let items: Vec<(Vec<u8>, Vec<u8>)> = db.iter().unwrap().alloc().collect();
 
-        assert_eq!(items.len(), 2us);
-        assert_eq!((&items[0].0).as_slice(), b"abc");
-        assert_eq!((&items[0].1).as_slice(), b"123");
-        assert_eq!((&items[1].0).as_slice(), b"foo");
-        assert_eq!((&items[1].1).as_slice(), b"bar");
+        assert_eq!(items.len(), 2);
+        assert_eq!((&items[0].0), b"abc");
+        assert_eq!((&items[0].1), b"123");
+        assert_eq!((&items[1].0), b"foo");
+        assert_eq!((&items[1].1), b"bar");
     }
 
     #[test]
@@ -1438,10 +1378,10 @@ mod tests {
 
         // Values should be in reverse order.
         assert_eq!(items.len(), 2);
-        assert_eq!((&items[0].0).as_slice(), b"zzzz");
-        assert_eq!((&items[0].1).as_slice(), b"bar");
-        assert_eq!((&items[1].0).as_slice(), b"aaaa");
-        assert_eq!((&items[1].1).as_slice(), b"foo");
+        assert_eq!((&items[0].0), b"zzzz");
+        assert_eq!((&items[0].1), b"bar");
+        assert_eq!((&items[1].0), b"aaaa");
+        assert_eq!((&items[1].1), b"foo");
     }
 
     #[test]
@@ -1459,13 +1399,13 @@ mod tests {
             Ok(val) => val.expect("Expected to find key 'abc'"),
             Err(why) => panic!("Error getting from DB: {:?}", why),
         };
-        assert!(snap_val.as_slice() == b"123");
+        assert_eq!(snap_val, b"123");
 
         let val = match db.get(b"abc") {
             Ok(val) => val.expect("Expected to find key 'abc'"),
             Err(why) => panic!("Error getting from DB: {:?}", why),
         };
-        assert!(val.as_slice() == b"456");
+        assert!(val == b"456");
 
         let iter_items: Vec<(Vec<u8>, Vec<u8>)> = snap.iter().unwrap().alloc().collect();
         let db_items: Vec<(Vec<u8>, Vec<u8>)> = db.iter().unwrap().alloc().collect();
@@ -1473,14 +1413,14 @@ mod tests {
         assert_eq!(iter_items.len(), 2);
         assert_eq!(db_items.len(), 2);
 
-        assert_eq!((&iter_items[0].0).as_slice(), b"abc");
-        assert_eq!((&iter_items[0].1).as_slice(), b"123");
-        assert_eq!((&iter_items[1].0).as_slice(), b"foo");
-        assert_eq!((&iter_items[1].1).as_slice(), b"bar");
+        assert_eq!((&iter_items[0].0), b"abc");
+        assert_eq!((&iter_items[0].1), b"123");
+        assert_eq!((&iter_items[1].0), b"foo");
+        assert_eq!((&iter_items[1].1), b"bar");
 
-        assert_eq!((&db_items[0].0).as_slice(), b"abc");
-        assert_eq!((&db_items[0].1).as_slice(), b"456");
-        assert_eq!((&db_items[1].0).as_slice(), b"foo");
-        assert_eq!((&db_items[1].1).as_slice(), b"bar");
+        assert_eq!((&db_items[0].0), b"abc");
+        assert_eq!((&db_items[0].1), b"456");
+        assert_eq!((&db_items[1].0), b"foo");
+        assert_eq!((&db_items[1].1), b"bar");
     }
 }
