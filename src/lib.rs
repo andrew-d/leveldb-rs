@@ -26,7 +26,7 @@ use std::path::Path;
 use std::mem::transmute;
 use std::ptr;
 use std::slice;
-use std::rc::Rc;
+use std::sync::Arc;
 use std::str;
 
 use libc::{c_char, c_int, c_uchar, c_void};
@@ -885,7 +885,7 @@ impl DBImpl {
             Err(v) => return Err(v),
         };
 
-        Ok(Rc::new(DBImpl {
+        Ok(Arc::new(DBImpl {
             db: db,
             opts: opts,
         }))
@@ -989,14 +989,18 @@ impl Drop for DBImpl {
 
 // A reference-counted pointer to a database implementation.  We need to use
 // this, since snapshots can hold on to a reference to a DB.
-type DBImplPtr = Rc<DBImpl>;
+type DBImplPtr = Arc<DBImpl>;
 
 /**
  * This struct represents an open instance of the database.
- */
+*/
+#[derive(Clone)]
 pub struct DB {
     db: DBImplPtr,
 }
+
+unsafe impl Send for DB {}
+unsafe impl Sync for DB {}
 
 impl DB {
     /**
