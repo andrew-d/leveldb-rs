@@ -8,7 +8,7 @@ description = "Bindings to the LevelDB key/value storage library (https://github
 documentation = "http://rust-ci.org/andrew-d/leveldb-rs/doc/leveldb/"
 repository = "https://github.com/andrew-d/leveldb-rs"
 keywords = ["bindings", "database", "leveldb"]
-license = "MIT"
+license = "MIT OR Apache-2.0"
 
 [features]
 snappy = ["leveldb-sys/snappy"]
