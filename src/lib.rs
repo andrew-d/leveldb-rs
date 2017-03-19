@@ -29,8 +29,7 @@ use std::slice;
 use std::rc::Rc;
 use std::str;
 
-use libc::{c_char, c_int, c_uchar, c_void};
-use libc::types::os::arch::c95::size_t;
+use libc::{c_char, c_int, c_uchar, c_void, size_t};
 
 use leveldb_sys as cffi;
 
