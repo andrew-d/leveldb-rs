@@ -252,9 +252,9 @@ impl DBOptions {
     #[cfg(feature = "snappy")]
     pub fn set_compression(&mut self, val: bool) -> &mut DBOptions {
         let val = if val {
-            cffi::LEVELDB_SNAPPY_COMPRESSION
+            cffi::Compression::Snappy
         } else {
-            cffi::LEVELDB_NO_COMPRESSION
+            cffi::Compression::No
         };
 
         unsafe {
